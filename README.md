@@ -7,7 +7,7 @@ It is designed to be simple enough for experimentation, yet structured enough to
 
 ---
 
-## 🚀 Features
+##  Features
 
 ### **1. Relevance Scoring**
 Uses semantic similarity (sentence-transformers) to measure how aligned a model’s response is with the provided reference/context.
@@ -26,6 +26,139 @@ Cost estimation based on input/output token counts and configurable pricing.
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
+llm-evaluation-pipeline/
+│
+├── evaluator/
+│ ├── relevance.py
+│ ├── hallucination.py
+│ ├── latency.py
+│ ├── cost.py
+│ └── pipeline.py
+│
+├── examples/
+│ ├── conversation.json
+│ └── context.json
+│
+├── tests/
+│ └── test_relevance.py
+│
+├── docs/
+│ └── architecture.md
+│
+├── .github/workflows/
+│ └── ci.yml
+│
+├── main.py
+├── benchmark.py
+├── Dockerfile
+├── requirements.txt
+└── README.md
 
+yaml
+Copy code
+
+This layout mirrors modern Python project structure and supports CI, testing, and container deployment.
+
+---
+
+##  Installation
+
+### **1. Create & activate a virtual environment**
+
+**PowerShell:**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+Git Bash / Linux:
+
+bash
+Copy code
+python -m venv .venv
+source .venv/bin/activate
+2. Install dependencies
+bash
+Copy code
+pip install -r requirements.txt
+ Running an Evaluation
+bash
+Copy code
+python main.py
+Expected output (sample):
+
+json
+Copy code
+{
+  "relevance": 0.82,
+  "hallucination": { ... },
+  "latency_ms": 0.12,
+  "estimated_cost": 0.00003
+}
+Run Tests
+bash
+Copy code
+pytest -q
+Tests are automatically executed in GitHub Actions through ci.yml.
+
+ Docker Support
+Build:
+
+bash
+Copy code
+docker build -t llm-eval .
+Run:
+
+bash
+Copy code
+docker run --rm -it llm-eval
+ Documentation
+Full architectural explanation is available in:
+
+bash
+Copy code
+docs/architecture.md
+It covers:
+
+Design decisions
+
+Relevance calculation
+
+NLI-based hallucination pipeline
+
+Scaling considerations
+
+Model selection rationale
+
+Benchmarking
+To measure evaluation speed:
+
+bash
+Copy code
+python benchmark.py
+License
+This project is released under the MIT License.
+
+Author
+Developed by Meet Jadhav
+GitHub: https://github.com/acrocantosauras
+
+yaml
+Copy code
+
+---
+
+#  **WHERE TO PASTE IT**
+In your VS Code:
+
+1. Open the folder: `llm-evaluation-pipeline`
+2. Click **README.md**
+3. CTRL + A → delete everything inside the file
+4. Paste the entire README content from above
+5. Save the file
+6. Commit & push:
+
+```bash
+git add README.md
+git commit -m "Update README with full project documentation"
+git push
