@@ -1,0 +1,9 @@
+{
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What are the side effects of ibuprofen?"}
+  ],
+  "model_response": "Ibuprofen may cause stomach pain, nausea, and dizziness.",
+  "input_tokens": 40,
+  "output_tokens": 22
+}
