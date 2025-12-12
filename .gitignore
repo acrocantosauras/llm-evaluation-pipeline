@@ -12,7 +12,7 @@ data/
 models/
 
 # OS
-.DS_Store
+.DS_Store  
 
 # IDE
 .vscode/

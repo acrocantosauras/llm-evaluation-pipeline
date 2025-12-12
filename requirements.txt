@@ -1,3 +1,16 @@
-# Add your core runtime dependencies here
+# Core
+numpy
+scipy
+tqdm
+psutil
+
+# Embeddings & transformers
+sentence-transformers>=2.2.2
+transformers>=4.35.0
+torch>=2.0.0
+
+# Testing / CI
 pytest
-black
+
+# Optional for faster inference
+onnxruntime
