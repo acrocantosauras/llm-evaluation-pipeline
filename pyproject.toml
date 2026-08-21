@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-evaluation-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 description = "A modular framework for evaluating LLM responses: relevance, hallucination, latency, and cost."
 readme = "README.md"
 license = "MIT"
@@ -20,11 +20,20 @@ dependencies = [
     "sentence-transformers>=2.2.2",
     "transformers>=4.35.0",
     "torch>=2.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "sqlalchemy>=2.0.23",
+    "psycopg[binary]>=3.1.13",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-asyncio",
+    "httpx",
     "ruff",
 ]
 onnx = [
@@ -35,7 +44,7 @@ onnx = [
 llm-eval = "main:main"
 
 [tool.setuptools.packages.find]
-include = ["evaluator*"]
+include = ["evaluator*", "app*"]
 
 [tool.setuptools.package-data]
 evaluator = ["py.typed"]
@@ -58,10 +67,11 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "B008",   # Depends() in FastAPI function signatures is standard
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["evaluator"]
+known-first-party = ["evaluator", "app"]
 
 # ── Pytest ────────────────────────────────────────────────────────────────────
 
