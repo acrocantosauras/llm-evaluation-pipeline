@@ -2,8 +2,6 @@
 
 A production-grade, deployable LLM Evaluation & Quality-Gate Platform.
 
-This repository implements a modular evaluation pipeline for LLM responses, with a FastAPI-based REST API and PostgreSQL persistence.
-
 ## Features
 
 - **Relevance Scoring** — Sentence-transformer embeddings for semantic similarity
@@ -11,41 +9,33 @@ This repository implements a modular evaluation pipeline for LLM responses, with
 - **Latency Measurement** — Execution time profiling
 - **Token Cost Estimation** — Configurable token-based pricing
 - **REST API** — FastAPI with automatic OpenAPI documentation
-- **PostgreSQL Persistence** — Durable storage for evaluation runs
+- **Async Evaluation** — Background job processing via Redis + arq
+- **Batch Evaluation** — Process multiple evaluation cases in one job
+- **Quality Gates** — Configurable per-metric thresholds
+- **Baselines** — Mark runs as baselines for comparison
+- **Regression Detection** — Compare runs against baselines with metric-aware direction
+- **PostgreSQL Persistence** — Durable storage for all evaluation data
 - **Docker Compose** — One-command local development stack
 
 ## Quick Start
 
-### Using Docker Compose (recommended)
+### Docker Compose (recommended)
 
 ```bash
 docker compose up --build
 ```
 
-This starts:
-- **API** at `http://localhost:8000`
-- **PostgreSQL** at `localhost:5432`
-- **Swagger docs** at `http://localhost:8000/docs`
+Starts: API (port 8000), Worker, PostgreSQL (port 5432), Redis (port 6379)
 
 ### Local Development
 
-1. Start PostgreSQL (via Docker or local install)
-2. Set environment variables:
-   ```bash
-   export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/llm_eval
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Run migrations:
-   ```bash
-   alembic upgrade head
-   ```
-5. Start the API:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload
+# In another terminal:
+arq app.worker.WorkerSettings
+```
 
 ## API Endpoints
 
@@ -53,120 +43,79 @@ This starts:
 |--------|------|-------------|
 | `GET` | `/health` | Application health check |
 | `GET` | `/ready` | Database readiness check |
-| `POST` | `/api/v1/evaluations` | Submit an evaluation request |
-| `GET` | `/api/v1/runs` | List evaluation runs (paginated) |
-| `GET` | `/api/v1/runs/{run_id}` | Retrieve a specific evaluation run |
-| `GET` | `/api/v1/datasets` | Dataset management (stub, Phase 2+) |
+| `POST` | `/api/v1/evaluations` | Synchronous evaluation |
+| `POST` | `/api/v1/evaluations/async` | Async batch evaluation (202) |
+| `GET` | `/api/v1/runs` | List evaluation runs |
+| `GET` | `/api/v1/runs/{id}` | Get evaluation run |
+| `GET` | `/api/v1/runs/{id}/compare/{baseline_id}` | Compare run to baseline |
+| `GET` | `/api/v1/jobs` | List evaluation jobs |
+| `GET` | `/api/v1/jobs/{id}` | Get job status + progress |
+| `POST` | `/api/v1/jobs/{id}/cancel` | Cancel a job |
+| `GET` | `/api/v1/jobs/{id}/quality-gate` | Get quality gate result |
+| `POST` | `/api/v1/baselines` | Create baseline from run |
+| `GET` | `/api/v1/baselines` | List baselines |
+| `GET` | `/api/v1/quality-gates` | List quality gates |
+| `POST` | `/api/v1/quality-gates` | Create quality gate |
 
-### Example: Submit Evaluation
+## Example: Batch Evaluation
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/evaluations \
+curl -X POST http://localhost:8000/api/v1/evaluations/async \
   -H "Content-Type: application/json" \
   -d '{
-    "conversation": {
-      "model_response": "Ibuprofen may cause stomach pain and nausea.",
-      "input_tokens": 40,
-      "output_tokens": 15
-    },
-    "context": [
-      {"id": "1", "text": "Ibuprofen can cause stomach upset, nausea, dizziness."}
+    "items": [
+      {"conversation": {"model_response": "Drug X reduces fever.", "input_tokens": 20, "output_tokens": 10}, "context": [{"text": "Drug X treats fever."}]},
+      {"conversation": {"model_response": "Drug Y causes drowsiness.", "input_tokens": 20, "output_tokens": 10}, "context": [{"text": "Drug Y may cause drowsiness."}]}
     ]
   }'
-```
-
-### Example: Retrieve Run
-
-```bash
-curl http://localhost:8000/api/v1/runs/{run_id}
-```
-
-## Project Structure
-
-```
-llm-evaluation-pipeline/
-├── app/                        # FastAPI application
-│   ├── main.py                 # Application factory
-│   ├── api/                    # API layer
-│   │   ├── routes/             # Route handlers
-│   │   │   ├── health.py       # Health & readiness endpoints
-│   │   │   ├── evaluations.py  # Evaluation creation
-│   │   │   ├── runs.py         # Run retrieval
-│   │   │   └── datasets.py     # Dataset stubs
-│   │   └── schemas/            # Pydantic request/response models
-│   │       ├── evaluations.py
-│   │       ├── runs.py
-│   │       └── datasets.py
-│   ├── services/               # Business logic
-│   │   └── evaluation_service.py
-│   ├── db/                     # Database layer
-│   │   ├── base.py             # SQLAlchemy declarative base
-│   │   ├── session.py          # Session management
-│   │   └── models.py           # ORM models
-│   └── core/                   # Configuration
-│       └── config.py           # pydantic-settings config
-├── evaluator/                  # Core evaluation engine
-│   ├── relevance.py            # Relevance scoring
-│   ├── hallucination.py        # Hallucination detection
-│   ├── latency.py              # Latency measurement
-│   ├── cost.py                 # Cost estimation
-│   └── pipeline.py             # Evaluation pipeline
-├── alembic/                    # Database migrations
-│   ├── env.py
-│   └── versions/
-├── tests/                      # Test suite
-│   ├── test_api_health.py      # Health endpoint tests
-│   ├── test_api_evaluations.py # Evaluation API tests
-│   ├── test_api_runs.py        # Run retrieval tests
-│   └── ...
-├── docker-compose.yml          # Local dev stack
-├── Dockerfile
-├── pyproject.toml
-└── requirements.txt
-```
-
-## Database Migrations
-
-```bash
-# Apply migrations
-alembic upgrade head
-
-# Create a new migration
-alembic revision --autogenerate -m "description"
-```
-
-## Running Tests
-
-```bash
-# Unit and integration tests
-pytest -q
-
-# Linting
-ruff check .
-
-# Formatting check
-ruff format --check .
-
-# CLI evaluation (standalone, no API)
-python main.py
 ```
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/llm_eval` | PostgreSQL connection string |
+| `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/llm_eval` | PostgreSQL URL |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis URL |
+| `WORKER_CONCURRENCY` | `2` | Max concurrent worker jobs |
+| `WORKER_MAX_RETRIES` | `3` | Max retry attempts per job |
 | `APP_ENV` | `development` | Application environment |
 | `LOG_LEVEL` | `info` | Logging level |
-| `CORS_ORIGINS` | `["*"]` | Allowed CORS origins |
 
-See `.env.example` for a template.
+## Running Tests
+
+```bash
+pytest -q           # All tests
+ruff check .        # Linting
+ruff format --check .  # Formatting
+```
+
+## Project Structure
+
+```
+app/
+├── main.py              # FastAPI application
+├── worker.py            # arq worker
+├── core/
+│   ├── config.py        # pydantic-settings
+│   └── enums.py         # JobStatus, GateOutcome
+├── api/
+│   ├── routes/          # Health, evaluations, jobs, baselines
+│   └── schemas/         # Pydantic request/response models
+├── services/
+│   ├── evaluation_service.py  # Sync evaluation
+│   ├── job_service.py         # Job lifecycle
+│   ├── quality_gate_service.py # Gate evaluation
+│   ├── baseline_service.py    # Baselines & regression
+│   └── redis_queue.py         # Redis queue operations
+└── db/
+    ├── base.py          # SQLAlchemy base
+    ├── models.py        # ORM models
+    └── session.py       # Session management
+evaluator/               # Core evaluation engine (unchanged)
+alembic/                 # Database migrations
+tests/                   # 108 tests
+```
 
 ## License
 
 MIT
-
-## Author
-
-Meet Jadhav
-GitHub: https://github.com/acrocantosauras

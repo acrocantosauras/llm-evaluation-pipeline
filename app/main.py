@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import datasets, evaluations, health, runs
+from app.api.routes import baselines, datasets, evaluations, health, jobs, runs
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -16,7 +16,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         description="Production-grade LLM Evaluation & Quality-Gate Platform API",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/docs",
         redoc_url="/redoc",
     )
@@ -32,6 +32,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(evaluations.router)
     app.include_router(runs.router)
+    app.include_router(jobs.router)
+    app.include_router(baselines.router)
     app.include_router(datasets.router)
 
     logger.info("Application started: env=%s", settings.APP_ENV)

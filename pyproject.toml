@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-evaluation-pipeline"
-version = "0.2.0"
+version = "0.3.0"
 description = "A modular framework for evaluating LLM responses: relevance, hallucination, latency, and cost."
 readme = "README.md"
 license = "MIT"
@@ -27,6 +27,8 @@ dependencies = [
     "sqlalchemy>=2.0.23",
     "psycopg[binary]>=3.1.13",
     "alembic>=1.13.0",
+    "redis>=5.0.0",
+    "arq>=0.25.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "httpx",
+    "fakeredis",
     "ruff",
 ]
 onnx = [

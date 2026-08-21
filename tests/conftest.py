@@ -5,10 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Set DATABASE_URL to SQLite BEFORE any app imports
+# Set environment BEFORE any app imports
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["APP_ENV"] = "testing"
 os.environ["LOG_LEVEL"] = "warning"
+os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 
 
 VALID_REQUEST = {
@@ -73,14 +74,11 @@ def _mock_heavy_modules():
 
 @pytest.fixture()
 def client():
-    """Create a TestClient with a SQLite in-memory database and mocked evaluator.
-
-    The heavy ML modules are mocked for the lifetime of this fixture to avoid
-    model downloads. Evaluator-specific tests handle their own mocking.
-    """
+    """Create a TestClient with a SQLite in-memory database, mocked evaluator, and fakeredis."""
     _mock_heavy_modules()
 
-    from sqlalchemy import create_engine
+    import fakeredis
+    from sqlalchemy import create_engine, event
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
@@ -89,12 +87,19 @@ def client():
     from app.db.session import get_db
     from app.main import app
 
-    # StaticPool ensures all connections share the same in-memory database
+    # Use SQLite for tests
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
 
@@ -107,14 +112,23 @@ def client():
 
     app.dependency_overrides[get_db] = override_get_db
 
-    from fastapi.testclient import TestClient
+    # Patch Redis with fakeredis
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    import app.services.redis_queue as rq
 
-    with TestClient(app) as c:
+    original_get_redis = rq.get_redis_client
+    rq.get_redis_client = lambda: fake
+
+    from fastapi.testclient import TestClient as TC
+
+    with TC(app) as c:
         yield c
 
     app.dependency_overrides.clear()
+    rq.get_redis_client = original_get_redis
+    fake.flushall()
 
-    # Restore original evaluator modules so evaluator-specific tests aren't affected
+    # Restore evaluator modules
     for mod_name in [
         "evaluator.relevance",
         "evaluator.hallucination",
@@ -123,3 +137,33 @@ def client():
         "evaluator.pipeline",
     ]:
         sys.modules.pop(mod_name, None)
+
+
+@pytest.fixture()
+def db_session():
+    """Provide a direct database session for service-level tests."""
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    import app.db.models  # noqa: F401
+    from app.db.base import Base
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestSession()
+    yield session
+    session.close()

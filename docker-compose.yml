@@ -15,6 +15,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: .
@@ -25,10 +35,32 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/llm_eval
+      REDIS_URL: redis://redis:6379/0
       APP_ENV: development
       LOG_LEVEL: info
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    user: appuser
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      sh -c "arq app.worker.WorkerSettings"
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/llm_eval
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+      LOG_LEVEL: info
+      WORKER_CONCURRENCY: "2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     user: appuser
 

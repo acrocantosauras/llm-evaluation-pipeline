@@ -1,96 +1,152 @@
 # Architecture Overview
 
-## Phase 1 Architecture
+## Phase 2 Architecture
 
 ```
-Client
-  │
-  ▼
-FastAPI (app/)
-  │
-  ├── GET /health          → Application health
-  ├── GET /ready           → Database readiness
-  ├── POST /api/v1/evaluations  → Run evaluation
-  ├── GET /api/v1/runs/{id}     → Retrieve run
-  ├── GET /api/v1/runs          → List runs
-  └── GET /api/v1/datasets      → (stub, Phase 2+)
-  │
-  ▼
-EvaluationService (app/services/)
-  │
-  ▼
-EvaluationEngine (evaluator/)
-  │
-  ├── relevance   → Sentence-transformer cosine similarity
-  ├── hallucination → NLI-based sentence classification
-  ├── latency     → Timing measurement
-  └── cost        → Token-based cost estimation
-  │
-  ▼
-PostgreSQL (via SQLAlchemy + Alembic)
-  │
-  └── evaluation_runs table
+                     Client
+                       │
+                       ▼
+                    FastAPI
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+          ▼                         ▼
+   Synchronous API          Async Evaluation API
+   POST /api/v1/evaluations  POST /api/v1/evaluations/async
+          │                         │
+          │                         ▼
+          │                      Redis Queue
+          │                         │
+          │                         ▼
+          │                    arq Worker
+          │                         │
+          │                         ▼
+          │                EvaluationService
+          │                         │
+          │                  EvaluationEngine
+          │                  ┌──────┴──────┐
+          │             relevance  hallucination
+          │             latency    cost
+          │                         │
+          │                    PostgreSQL
+          │                         │
+          │               ┌─────────┴─────────┐
+          │               │                   │
+          │          Quality Gate      Baseline Comparison
+          │          (thresholds)      (regression detection)
+          │
+          ▼
+    Direct Response
 ```
 
 ## Components
 
-### API Layer (`app/`)
+### Application Layer (`app/`)
 
-- **FastAPI application** with automatic OpenAPI documentation
-- **Pydantic schemas** for request/response validation
-- **Route handlers** organized by domain (health, evaluations, runs)
-- **Configuration** via `pydantic-settings` from environment variables
+- **FastAPI** with async evaluation, job management, quality gates, and baselines
+- **arq worker** processes evaluation jobs asynchronously from Redis queue
+- **SQLAlchemy** ORM with PostgreSQL for persistent storage
+- **Redis** for job queue, job state, and temporary progress
 
-### Service Layer (`app/services/`)
+### Core Evaluation Engine (`evaluator/`)
 
-- **EvaluationService** bridges the API layer and the evaluation engine
-- Translates API request format to evaluator engine format
-- Manages persistence through SQLAlchemy sessions
-- Keeps route handlers thin — all business logic lives here
+Unchanged from Phase 0 — the core evaluation engine remains the source of truth:
+- Relevance scoring (sentence-transformer cosine similarity)
+- Hallucination detection (NLI sentence classification)
+- Latency measurement
+- Cost estimation
 
-### Evaluation Engine (`evaluator/`)
+### Job System
 
-The core evaluation package remains unchanged from Phase 0:
+- Jobs represent batch evaluation requests
+- Job statuses: queued → running → completed/failed/cancelled
+- Progress tracking: total, completed, failed items
+- Idempotency: re-executing a completed job is a no-op
+- Cooperative cancellation: worker checks for cancellation before each item
 
-- **Relevance Scoring** — Sentence-transformer embeddings (`all-MiniLM-L6-v2`) with cosine similarity
-- **Hallucination Detection** — NLI model (`roberta-large-mnli`) classifying sentences as supported/contradicted/unsupported
-- **Latency Measurement** — Timing utility for execution profiling
-- **Cost Estimation** — Token-based cost calculation with configurable pricing
+### Quality Gates
 
-### Database Layer (`app/db/`)
+Configurable per-metric thresholds:
+- **Relevance**: minimum score (higher is better)
+- **Hallucination**: maximum unsupported fraction (lower is better)
+- **Latency**: maximum ms (lower is better)
+- **Cost**: maximum estimated cost (lower is better)
 
-- **SQLAlchemy 2.0** ORM with mapped_column style
-- **Alembic** migrations as the source of truth for schema management
-- **EvaluationRun** model stores input data and evaluation results as JSONB columns
+Quality gates produce PASS/FAIL with individual check results.
 
-## Database Schema
+### Baselines & Regression Detection
 
-### `evaluation_runs`
+- Mark any evaluation run as a baseline
+- Compare subsequent runs against baselines
+- Metric-aware direction: understands higher-is-better vs lower-is-better
+- Configurable tolerances per metric
+- Produces regression and improvement reports
+
+## Database Schema (Phase 2 additions)
+
+### `evaluation_jobs`
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | UUID (PK) | Unique run identifier |
+| `id` | UUID (PK) | Unique job identifier |
 | `created_at` | DateTime(tz) | UTC creation timestamp |
-| `status` | String(20) | Run status (completed, failed, pending) |
-| `conversation` | JSONB | Original conversation input |
-| `context` | JSONB | Original context input |
-| `relevance` | Float | Relevance score [0, 1] |
-| `hallucination` | JSONB | Hallucination report with flags and details |
-| `latency_ms` | Float | Latency in milliseconds |
-| `estimated_cost` | Float | Estimated token cost |
+| `started_at` | DateTime(tz) | When worker began processing |
+| `completed_at` | DateTime(tz) | When job finished |
+| `status` | String(20) | queued/running/completed/failed/cancelled |
+| `total_items` | Integer | Total evaluation cases |
+| `completed_items` | Integer | Successfully processed |
+| `failed_items` | Integer | Failed during processing |
+| `error_message` | String(1000) | Error details if failed |
+| `items` | JSONB | Input evaluation cases |
+| `evaluation_run_id` | UUID (FK) | Associated run |
+| `quality_gate_id` | UUID (FK) | Associated quality gate |
+| `batch_results` | JSONB | Per-item results |
 
-## Environment Variables
+### `quality_gates`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/llm_eval` | PostgreSQL connection string |
-| `APP_ENV` | `development` | Application environment |
-| `LOG_LEVEL` | `info` | Logging level |
-| `CORS_ORIGINS` | `["*"]` | Allowed CORS origins |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID (PK) | Unique gate identifier |
+| `created_at` | DateTime(tz) | Creation timestamp |
+| `name` | String(100) | Unique gate name |
+| `thresholds` | JSONB | Per-metric threshold config |
+| `enabled` | Boolean | Whether gate is active |
+
+### `evaluation_baselines`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID (PK) | Unique baseline identifier |
+| `created_at` | DateTime(tz) | Creation timestamp |
+| `name` | String(100) | Unique baseline name |
+| `description` | String(500) | Description |
+| `run_id` | UUID (FK) | The run marked as baseline |
+
+### `evaluation_runs` (modified)
+
+| New Column | Type | Description |
+|-----------|------|-------------|
+| `is_baseline` | Boolean | Whether this run is a baseline |
+
+## Redis Usage
+
+| Key Pattern | Purpose | TTL |
+|------------|---------|-----|
+| `llm_eval:jobs:queue` | Job ID queue (list) | Persistent |
+| `llm_eval:jobs:state:{id}` | Job state JSON | 24h |
+| `llm_eval:jobs:progress:{id}` | Progress JSON | 24h |
+
+## Migration History
+
+```
+<base> → 001_initial (evaluation_runs)
+  → 002_phase2 (evaluation_jobs, quality_gates, evaluation_baselines, is_baseline)
+```
 
 ## Scaling Notes
 
-- Cache embeddings in Redis (Phase 2+)
-- Use ONNX runtime for faster NLI inference
-- Batch NLI queries for throughput
-- Add async workers for background evaluation (Phase 2+)
+- Worker concurrency via `WORKER_CONCURRENCY` env var
+- Redis handles temporary job state (TTL 24h)
+- PostgreSQL is source of truth for persistent data
+- Batch evaluations process items sequentially within a job
+- Future: batch NLI queries, ONNX runtime, async evaluation

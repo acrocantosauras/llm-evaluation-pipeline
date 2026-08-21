@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/llm_eval"
 
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Worker
+    WORKER_CONCURRENCY: int = 2
+    WORKER_MAX_RETRIES: int = 3
+
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
 
