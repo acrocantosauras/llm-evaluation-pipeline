@@ -14,6 +14,21 @@ DEFAULT_THRESHOLDS = {
     "estimated_cost": {"max": 0.01},
 }
 
+# Direction map: which metrics are higher_is_better vs lower_is_better
+METRIC_DIRECTION = {
+    "relevance": "higher_is_better",
+    "faithfulness": "higher_is_better",
+    "context_precision": "higher_is_better",
+    "context_recall": "higher_is_better",
+    "answer_relevancy": "higher_is_better",
+    "citation_correctness": "higher_is_better",
+    "hallucination_fraction_unsupported": "lower_is_better",
+    "latency_ms": "lower_is_better",
+    "estimated_cost": "lower_is_better",
+    "composite_score": "higher_is_better",
+    "llm_judge": "higher_is_better",
+}
+
 
 def create_quality_gate(
     db: Session,
@@ -52,58 +67,36 @@ def list_quality_gates(db: Session) -> list[QualityGate]:
 def evaluate_gate(thresholds: dict, results: dict) -> dict:
     """Evaluate evaluation results against quality gate thresholds.
 
-    Args:
-        thresholds: Gate threshold configuration.
-        results: Evaluation results dict with metric values.
-
-    Returns:
-        Dict with overall status and individual check results.
+    Now supports both legacy metrics and new advanced metrics.
+    Uses METRIC_DIRECTION to determine threshold logic.
     """
     checks = {}
 
-    # Relevance: higher is better → check minimum
-    if "relevance" in thresholds and results.get("relevance") is not None:
-        min_val = thresholds["relevance"].get("min", 0)
-        value = results["relevance"]
-        checks["relevance"] = {
-            "value": value,
-            "threshold": min_val,
-            "passed": value >= min_val,
-            "direction": "higher_is_better",
-        }
+    for metric_name, threshold_config in thresholds.items():
+        if metric_name not in METRIC_DIRECTION:
+            continue
 
-    # Hallucination unsupported fraction: lower is better → check maximum
-    if "hallucination_fraction_unsupported" in thresholds and results.get("hallucination"):
-        max_val = thresholds["hallucination_fraction_unsupported"].get("max", 1.0)
-        fraction = 1.0 - results["hallucination"].get("fraction_supported", 1.0)
-        checks["hallucination_fraction_unsupported"] = {
-            "value": round(fraction, 4),
-            "threshold": max_val,
-            "passed": fraction <= max_val,
-            "direction": "lower_is_better",
-        }
+        direction = METRIC_DIRECTION[metric_name]
+        value = _extract_metric_value(metric_name, results)
+        if value is None:
+            continue
 
-    # Latency: lower is better → check maximum
-    if "latency_ms" in thresholds and results.get("latency_ms") is not None:
-        max_val = thresholds["latency_ms"].get("max", float("inf"))
-        value = results["latency_ms"]
-        checks["latency_ms"] = {
-            "value": value,
-            "threshold": max_val,
-            "passed": value <= max_val,
-            "direction": "lower_is_better",
-        }
-
-    # Cost: lower is better → check maximum
-    if "estimated_cost" in thresholds and results.get("estimated_cost") is not None:
-        max_val = thresholds["estimated_cost"].get("max", float("inf"))
-        value = results["estimated_cost"]
-        checks["estimated_cost"] = {
-            "value": value,
-            "threshold": max_val,
-            "passed": value <= max_val,
-            "direction": "lower_is_better",
-        }
+        if direction == "higher_is_better":
+            min_val = threshold_config.get("min", 0)
+            checks[metric_name] = {
+                "value": value,
+                "threshold": min_val,
+                "passed": value >= min_val,
+                "direction": direction,
+            }
+        else:
+            max_val = threshold_config.get("max", float("inf"))
+            checks[metric_name] = {
+                "value": value,
+                "threshold": max_val,
+                "passed": value <= max_val,
+                "direction": direction,
+            }
 
     all_passed = all(c["passed"] for c in checks.values()) if checks else True
 
@@ -111,3 +104,22 @@ def evaluate_gate(thresholds: dict, results: dict) -> dict:
         "status": GateOutcome.PASS if all_passed else GateOutcome.FAIL,
         "checks": checks,
     }
+
+
+def _extract_metric_value(metric_name: str, results: dict) -> float | None:
+    """Extract a metric value from results dict, handling various formats."""
+    # Direct value
+    if metric_name in results and results[metric_name] is not None:
+        return float(results[metric_name])
+
+    # Hallucination fraction
+    if metric_name == "hallucination_fraction_unsupported" and results.get("hallucination"):
+        return 1.0 - results["hallucination"].get("fraction_supported", 1.0)
+
+    # Metric results array (from advanced evaluators)
+    if "metric_results" in results:
+        for mr in results["metric_results"]:
+            if mr.get("metric") == metric_name and mr.get("error") is None:
+                return float(mr["score"])
+
+    return None

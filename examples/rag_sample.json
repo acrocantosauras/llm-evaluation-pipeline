@@ -1,0 +1,32 @@
+{
+  "samples": [
+    {
+      "question": "What are the side effects of ibuprofen?",
+      "answer": "Ibuprofen may cause stomach pain, nausea, dizziness, and kidney problems with long-term use.",
+      "context": [
+        {"id": "doc-1", "text": "Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID) used to reduce pain and inflammation."},
+        {"id": "doc-2", "text": "Common side effects of ibuprofen include stomach upset, nausea, dizziness, and drowsiness."},
+        {"id": "doc-3", "text": "Long-term use of ibuprofen may increase the risk of kidney problems and gastrointestinal bleeding."}
+      ],
+      "citations": [
+        {"source_id": "doc-2", "text": "Common side effects of ibuprofen include stomach pain and nausea."},
+        {"source_id": "doc-3", "text": "Long-term use may increase the risk of kidney problems."}
+      ],
+      "reference_answer": "Ibuprofen can cause stomach upset, nausea, dizziness, and with prolonged use, kidney complications."
+    },
+    {
+      "question": "How does photosynthesis work?",
+      "answer": "Photosynthesis converts carbon dioxide and water into glucose and oxygen using sunlight. The process occurs in chloroplasts and involves light-dependent and light-independent reactions.",
+      "context": [
+        {"id": "doc-1", "text": "Photosynthesis is the process by which plants convert light energy into chemical energy stored in glucose."},
+        {"id": "doc-2", "text": "The overall equation for photosynthesis is: 6CO2 + 6H2O + light energy → C6H12O6 + 6O2."},
+        {"id": "doc-3", "text": "Photosynthesis occurs in chloroplasts and involves two main stages: the light-dependent reactions and the Calvin cycle."}
+      ],
+      "citations": [
+        {"source_id": "doc-2", "text": "6CO2 + 6H2O + light energy → C6H12O6 + 6O2."},
+        {"source_id": "doc-3", "text": "Two main stages: light-dependent reactions and the Calvin cycle."}
+      ],
+      "reference_answer": "Photosynthesis uses sunlight to convert CO2 and water into glucose and oxygen in chloroplasts through light-dependent and light-independent reactions."
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "samples": [
+    {
+      "question": "What is the recommended dosage of metformin for type 2 diabetes?",
+      "answer": "The typical starting dose of metformin is 500mg twice daily, which can be increased to 2000mg per day. It should be taken with meals to reduce gastrointestinal side effects.",
+      "context": [
+        {"id": "rx-1", "text": "Metformin is first-line therapy for type 2 diabetes. Starting dose: 500mg twice daily or 850mg once daily."},
+        {"id": "rx-2", "text": "Maximum recommended dose is 2000-2550mg per day, divided into 2-3 doses."},
+        {"id": "rx-3", "text": "Metformin should be taken with meals to minimize gastrointestinal adverse effects."}
+      ],
+      "citations": [
+        {"source_id": "rx-1", "text": "Starting dose: 500mg twice daily."},
+        {"source_id": "rx-2", "text": "Maximum recommended dose is 2000mg per day."},
+        {"source_id": "rx-3", "text": "Take with meals to minimize GI effects."},
+        {"source_id": "rx-nonexistent", "text": "This citation points to a non-existent source."}
+      ]
+    }
+  ]
+}

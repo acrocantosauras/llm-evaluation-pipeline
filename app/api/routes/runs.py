@@ -3,14 +3,28 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.schemas.evaluations import MetricResultSchema
 from app.api.schemas.runs import PaginatedRunsResponse, RunResponse
 from app.db.session import get_db
-from app.services.evaluation_service import count_runs, get_run, list_runs
+from app.services.evaluation_service import count_runs, get_metric_results, get_run, list_runs
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
 
 def _run_to_response(run) -> RunResponse:
+    metric_records = run.metric_results if hasattr(run, "metric_results") and run.metric_results else []
+    metric_results = [
+        MetricResultSchema(
+            metric=m.metric,
+            score=m.score,
+            evaluator_version=m.evaluator_version,
+            passed=m.passed,
+            details=m.details or {},
+            error=m.error,
+        )
+        for m in metric_records
+    ]
+
     return RunResponse(
         run_id=run.id,
         status=run.status,
@@ -20,6 +34,9 @@ def _run_to_response(run) -> RunResponse:
             "latency_ms": run.latency_ms,
             "estimated_cost": run.estimated_cost,
         },
+        profile=getattr(run, "profile", None),
+        composite_score=getattr(run, "composite_score", None),
+        metric_results=metric_results,
         created_at=run.created_at,
     )
 
@@ -30,6 +47,11 @@ def get_evaluation_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunR
     run = get_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    # Eagerly load metric_results
+    metric_records = get_metric_results(db, run_id)
+    run.metric_results = metric_records
+
     return _run_to_response(run)
 
 

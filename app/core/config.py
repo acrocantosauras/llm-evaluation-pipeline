@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     WORKER_CONCURRENCY: int = 2
     WORKER_MAX_RETRIES: int = 3
 
+    # LLM Judge
+    JUDGE_PROVIDER: str = "openai"
+    JUDGE_MODEL: str = "gpt-4o-mini"
+    JUDGE_TEMPERATURE: float = 0.0
+    JUDGE_MAX_RETRIES: int = 3
+    JUDGE_TIMEOUT: float = 30.0
+
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
 

@@ -107,5 +107,5 @@ def test_evaluate_gate_hallucination_fraction():
     results = {"hallucination": {"fraction_supported": 0.85}}  # 15% unsupported
 
     gate_result = evaluate_gate(thresholds, results)
-    assert gate_result["checks"]["hallucination_fraction_unsupported"]["value"] == 0.15
+    assert abs(gate_result["checks"]["hallucination_fraction_unsupported"]["value"] - 0.15) < 0.001
     assert gate_result["checks"]["hallucination_fraction_unsupported"]["passed"] is False

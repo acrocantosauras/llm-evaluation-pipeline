@@ -21,12 +21,14 @@ class EvaluationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     status: Mapped[str] = mapped_column(String(20), default="completed")
     is_baseline: Mapped[bool] = mapped_column(default=False)
+    profile: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    composite_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Input data
     conversation: Mapped[dict] = mapped_column(JSON, nullable=False)
     context: Mapped[dict] = mapped_column(JSON, nullable=False)
 
-    # Evaluation results
+    # Legacy evaluation results (kept for backward compatibility)
     relevance: Mapped[float] = mapped_column(Float, nullable=True)
     hallucination: Mapped[dict] = mapped_column(JSON, nullable=True)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=True)
@@ -34,6 +36,28 @@ class EvaluationRun(Base):
 
     # Relationships
     job: Mapped["EvaluationJob | None"] = relationship(back_populates="evaluation_run", uselist=False)
+    metric_results: Mapped[list["MetricResultRecord"]] = relationship(back_populates="evaluation_run")
+
+
+class MetricResultRecord(Base):
+    """Stores individual metric results for an evaluation run."""
+
+    __tablename__ = "metric_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("evaluation_runs.id"), nullable=False, index=True
+    )
+    metric: Mapped[str] = mapped_column(String(100), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    passed: Mapped[bool | None] = mapped_column(nullable=True)
+    evaluator_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    # Relationships
+    evaluation_run: Mapped["EvaluationRun"] = relationship(back_populates="metric_results")
 
 
 class EvaluationJob(Base):
