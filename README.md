@@ -1,6 +1,6 @@
 # LLM Evaluation Platform
 
-A production-oriented, deployment-ready LLM Evaluation & Quality-Gate Platform.
+A production-oriented LLM Evaluation & Quality-Gate Platform for measuring, comparing, and enforcing AI quality across the development lifecycle.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
