@@ -257,8 +257,6 @@ The repository includes a GitHub Actions workflow that:
 ## Known Limitations
 
 - **Cloud deployment**: Not yet performed. Docker Compose config is production-ready but requires a cloud provider.
-- **Dashboard authentication**: The dashboard does not currently pass API keys to the backend. It works in development mode (unauthenticated fallback).
-- **Worker metrics**: The worker does not yet expose a `/metrics` endpoint. Prometheus config is ready for when it is added.
 - **Grafana**: Dashboard auto-provisioned in `docker-compose.prod.yml`. Manual import available via `config/grafana/dashboards/llm-eval.json`.
 
 ## Cloud Deployment Status
