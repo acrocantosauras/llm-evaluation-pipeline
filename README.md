@@ -1,6 +1,6 @@
 # LLM Evaluation Platform
 
-A production-grade, deployable LLM Evaluation & Quality-Gate Platform.
+A production-oriented, deployment-ready LLM Evaluation & Quality-Gate Platform.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -293,7 +293,8 @@ For ad-hoc DB access use `docker compose exec postgres psql ...`.
 Put a TLS-terminating reverse proxy (Caddy/nginx/ALB) in front of the API port.
 
 ## Future Production Infrastructure
-<arg_value><b88a6f17>The following are deployment-scale concerns that depend on the target infrastructure and service-level requirements, and are outside the current application scope:
+
+The following are deployment-scale concerns that depend on the target infrastructure and service-level requirements, and are outside the current application scope:
 
 - High-availability PostgreSQL with automated failover
 - Automated backups / point-in-time recovery (PITR)
