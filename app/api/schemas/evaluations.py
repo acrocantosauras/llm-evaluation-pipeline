@@ -58,10 +58,10 @@ class MetricResultSchema(BaseModel):
 
 
 class EvaluationResult(BaseModel):
-    relevance: float
-    hallucination: HallucinationResult
-    latency_ms: float
-    estimated_cost: float
+    relevance: float | None = None
+    hallucination: HallucinationResult | None = None
+    latency_ms: float | None = None
+    estimated_cost: float | None = None
 
 
 class EvaluationResponse(BaseModel):

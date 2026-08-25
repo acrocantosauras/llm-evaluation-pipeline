@@ -14,6 +14,7 @@ def run_evaluation(
     context: dict,
     profile: str = "basic",
     judge_config: dict | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> EvaluationRun:
     """Execute evaluation and persist the result.
 
@@ -23,6 +24,7 @@ def run_evaluation(
         context: Context data for the evaluator.
         profile: Evaluation profile name (basic, rag, rag_strict, judge).
         judge_config: Optional judge configuration override.
+        project_id: Project ID for resource isolation.
 
     Returns:
         The persisted EvaluationRun record.
@@ -54,6 +56,7 @@ def run_evaluation(
     run = EvaluationRun(
         id=uuid.uuid4(),
         created_at=datetime.now(timezone.utc),
+        project_id=project_id,
         status="completed",
         profile=profile,
         composite_score=composite_score,
@@ -87,28 +90,44 @@ def run_evaluation(
     return run
 
 
-def get_metric_results(db: Session, run_id: uuid.UUID) -> list[MetricResultRecord]:
-    """Get all metric results for a run."""
-    return db.query(MetricResultRecord).filter(MetricResultRecord.run_id == run_id).all()
+def get_metric_results(db: Session, run_id: uuid.UUID, project_id: uuid.UUID | None = None) -> list[MetricResultRecord]:
+    """Get all metric results for a run, optionally scoped to a project."""
+    query = db.query(MetricResultRecord).filter(MetricResultRecord.run_id == run_id)
+    if project_id is not None:
+        # Join to verify the run belongs to the project
+        query = query.join(EvaluationRun, EvaluationRun.id == MetricResultRecord.run_id).filter(
+            EvaluationRun.project_id == project_id
+        )
+    return query.all()
 
 
-def get_run(db: Session, run_id: uuid.UUID) -> EvaluationRun | None:
-    """Retrieve an evaluation run by ID."""
-    return db.query(EvaluationRun).filter(EvaluationRun.id == run_id).first()
+def get_run(db: Session, run_id: uuid.UUID, project_id: uuid.UUID | None = None) -> EvaluationRun | None:
+    """Retrieve an evaluation run by ID, optionally scoped to a project."""
+    query = db.query(EvaluationRun).filter(EvaluationRun.id == run_id)
+    if project_id is not None:
+        query = query.filter(EvaluationRun.project_id == project_id)
+    return query.first()
 
 
 def list_runs(
     db: Session,
     offset: int = 0,
     limit: int = 20,
+    project_id: uuid.UUID | None = None,
 ) -> list[EvaluationRun]:
-    """List evaluation runs with pagination."""
-    return db.query(EvaluationRun).order_by(EvaluationRun.created_at.desc()).offset(offset).limit(limit).all()
+    """List evaluation runs with pagination, optionally scoped to a project."""
+    query = db.query(EvaluationRun)
+    if project_id is not None:
+        query = query.filter(EvaluationRun.project_id == project_id)
+    return query.order_by(EvaluationRun.created_at.desc()).offset(offset).limit(limit).all()
 
 
-def count_runs(db: Session) -> int:
-    """Count total evaluation runs."""
-    return db.query(EvaluationRun).count()
+def count_runs(db: Session, project_id: uuid.UUID | None = None) -> int:
+    """Count total evaluation runs, optionally scoped to a project."""
+    query = db.query(EvaluationRun)
+    if project_id is not None:
+        query = query.filter(EvaluationRun.project_id == project_id)
+    return query.count()
 
 
 def _build_sample(conversation: dict, context: list[dict] | dict) -> EvaluationSample:

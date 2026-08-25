@@ -34,11 +34,13 @@ def create_quality_gate(
     db: Session,
     name: str,
     thresholds: dict | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> QualityGate:
     """Create a new quality gate configuration."""
     gate = QualityGate(
         id=uuid.uuid4(),
         created_at=datetime.now(timezone.utc),
+        project_id=project_id,
         name=name,
         thresholds=thresholds or DEFAULT_THRESHOLDS,
         enabled=True,
@@ -49,19 +51,28 @@ def create_quality_gate(
     return gate
 
 
-def get_quality_gate(db: Session, gate_id: uuid.UUID) -> QualityGate | None:
-    """Get a quality gate by ID."""
-    return db.query(QualityGate).filter(QualityGate.id == gate_id).first()
+def get_quality_gate(db: Session, gate_id: uuid.UUID, project_id: uuid.UUID | None = None) -> QualityGate | None:
+    """Get a quality gate by ID, optionally scoped to a project."""
+    query = db.query(QualityGate).filter(QualityGate.id == gate_id)
+    if project_id is not None:
+        query = query.filter(QualityGate.project_id == project_id)
+    return query.first()
 
 
-def get_quality_gate_by_name(db: Session, name: str) -> QualityGate | None:
-    """Get a quality gate by name."""
-    return db.query(QualityGate).filter(QualityGate.name == name).first()
+def get_quality_gate_by_name(db: Session, name: str, project_id: uuid.UUID | None = None) -> QualityGate | None:
+    """Get a quality gate by name, optionally scoped to a project."""
+    query = db.query(QualityGate).filter(QualityGate.name == name)
+    if project_id is not None:
+        query = query.filter(QualityGate.project_id == project_id)
+    return query.first()
 
 
-def list_quality_gates(db: Session) -> list[QualityGate]:
-    """List all quality gates."""
-    return db.query(QualityGate).filter(QualityGate.enabled.is_(True)).all()
+def list_quality_gates(db: Session, project_id: uuid.UUID | None = None) -> list[QualityGate]:
+    """List all quality gates, optionally scoped to a project."""
+    query = db.query(QualityGate).filter(QualityGate.enabled.is_(True))
+    if project_id is not None:
+        query = query.filter(QualityGate.project_id == project_id)
+    return query.all()
 
 
 def evaluate_gate(thresholds: dict, results: dict) -> dict:

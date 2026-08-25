@@ -7,7 +7,7 @@ import pytest
 
 # Set environment BEFORE any app imports
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["APP_ENV"] = "testing"
+os.environ["APP_ENV"] = "development"
 os.environ["LOG_LEVEL"] = "warning"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 
@@ -111,6 +111,16 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # Seed a default project for the dev-mode auth fallback
+    from app.db.models import Project
+
+    seed_db = TestSession()
+    if not seed_db.query(Project).first():
+        default_project = Project(name="default", description="Default test project")
+        seed_db.add(default_project)
+        seed_db.commit()
+    seed_db.close()
 
     # Patch Redis with fakeredis
     fake = fakeredis.FakeRedis(decode_responses=True)

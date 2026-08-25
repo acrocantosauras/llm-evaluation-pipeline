@@ -13,8 +13,18 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+# Create non-root user
 RUN useradd --create-home appuser
+
+# Persist the HuggingFace/torch model cache under the user's home so a mounted
+# volume (see docker-compose.prod.yml) survives container recreation and models
+# are not re-downloaded on every restart.
+ENV HF_HOME=/home/appuser/.cache/huggingface
+RUN mkdir -p /home/appuser/.cache/huggingface && chown -R appuser:appuser /home/appuser/.cache
+
 USER appuser
 
 EXPOSE 8000
-CMD ["python", "main.py"]
+
+# Default command — override in docker-compose
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

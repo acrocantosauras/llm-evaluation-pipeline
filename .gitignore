@@ -20,6 +20,15 @@ models/
 
 # Secrets
 .env
+dashboard/.env
+
+# Temp files
+_ci_fail_tmp.json
+*.log
+
+# Build artifacts
+dashboard/.next/
+node_modules/
 
 # Docker
 pgdata/

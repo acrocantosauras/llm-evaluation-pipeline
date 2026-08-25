@@ -1,152 +1,170 @@
 # Architecture Overview
 
-## Phase 2 Architecture
+## System Architecture
 
 ```
-                     Client
-                       │
-                       ▼
-                    FastAPI
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-          ▼                         ▼
-   Synchronous API          Async Evaluation API
-   POST /api/v1/evaluations  POST /api/v1/evaluations/async
-          │                         │
-          │                         ▼
-          │                      Redis Queue
-          │                         │
-          │                         ▼
-          │                    arq Worker
-          │                         │
-          │                         ▼
-          │                EvaluationService
-          │                         │
-          │                  EvaluationEngine
-          │                  ┌──────┴──────┐
-          │             relevance  hallucination
-          │             latency    cost
-          │                         │
-          │                    PostgreSQL
-          │                         │
-          │               ┌─────────┴─────────┐
-          │               │                   │
-          │          Quality Gate      Baseline Comparison
-          │          (thresholds)      (regression detection)
-          │
-          ▼
-    Direct Response
+                         Users / CI
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+                 ▼                       ▼
+             Web Dashboard          REST API
+            (Next.js)             (FastAPI)
+                 │                       │
+                 └───────────┬───────────┘
+                             ▼
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+          PostgreSQL       Redis        Workers
+         (persistent     (queue +      (arq)
+          data)           temp state)
+                             │
+                             ▼
+                      Evaluation Engine
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+          Traditional    RAG Metrics    LLM Judge
+          Metrics        (5 evaluators) (provider-agnostic)
+              │              │              │
+              ▼              ▼              ▼
+           MetricResult Objects (versioned, structured)
+                             │
+                    ┌────────┼────────┐
+                    ▼        ▼        ▼
+                Quality    Baseline  Composite
+                Gates    Comparison  Scoring
+                             │
+                             ▼
+                         PostgreSQL
+                             │
+                ┌────────────┼────────────┐
+                ▼            ▼            ▼
+           Prometheus    Grafana     Dashboard
+           (metrics)    (dashboards) (visuals)
 ```
 
 ## Components
 
-### Application Layer (`app/`)
+### 1. Evaluation Engine (`evaluator/`)
 
-- **FastAPI** with async evaluation, job management, quality gates, and baselines
-- **arq worker** processes evaluation jobs asynchronously from Redis queue
-- **SQLAlchemy** ORM with PostgreSQL for persistent storage
-- **Redis** for job queue, job state, and temporary progress
+The core evaluation engine processes inputs and produces structured `MetricResult` objects.
 
-### Core Evaluation Engine (`evaluator/`)
+**Available evaluators:**
 
-Unchanged from Phase 0 — the core evaluation engine remains the source of truth:
-- Relevance scoring (sentence-transformer cosine similarity)
-- Hallucination detection (NLI sentence classification)
-- Latency measurement
-- Cost estimation
+| Evaluator | Version | Purpose | Direction |
+|-----------|---------|---------|-----------|
+| `relevance` | 1.0.0 | Semantic similarity (embeddings) | higher_is_better |
+| `hallucination` | 1.0.0 | NLI-based factual checking | lower_is_better |
+| `faithfulness` | 1.0.0 | Claim-level context support | higher_is_better |
+| `context_precision` | 1.0.0 | Retrieval relevance scoring | higher_is_better |
+| `context_recall` | 1.0.0 | Information completeness | higher_is_better |
+| `answer_relevancy` | 1.0.0 | QA alignment scoring | higher_is_better |
+| `citation_correctness` | 1.0.0 | Source attribution verification | higher_is_better |
+| `latency` | 1.0.0 | Execution time measurement | lower_is_better |
+| `cost` | 1.0.0 | Token cost estimation | lower_is_better |
+| `judge` | 1.0.0 | LLM-as-a-judge evaluation | higher_is_better |
 
-### Job System
+**Evaluation profiles** define which evaluators run:
+- `basic` — relevance, hallucination, latency, cost
+- `rag` — basic + faithfulness, context_precision, context_recall, answer_relevancy
+- `rag_strict` — rag + citation_correctness
+- `judge` — rag_strict + LLM judge
 
-- Jobs represent batch evaluation requests
-- Job statuses: queued → running → completed/failed/cancelled
-- Progress tracking: total, completed, failed items
-- Idempotency: re-executing a completed job is a no-op
-- Cooperative cancellation: worker checks for cancellation before each item
+### 2. Application Layer (`app/`)
 
-### Quality Gates
+FastAPI application with:
+- **20+ REST endpoints** with automatic OpenAPI docs
+- **Service layer** between routes and evaluator
+- **Authentication** via SHA-256 hashed API keys
+- **Rate limiting** per-project
+- **Request correlation** via X-Request-ID headers
+- **Structured logging** (JSON format)
 
-Configurable per-metric thresholds:
-- **Relevance**: minimum score (higher is better)
-- **Hallucination**: maximum unsupported fraction (lower is better)
-- **Latency**: maximum ms (lower is better)
-- **Cost**: maximum estimated cost (lower is better)
+### 3. Persistence (`PostgreSQL`)
 
-Quality gates produce PASS/FAIL with individual check results.
+| Table | Purpose |
+|-------|---------|
+| `projects` | Multi-tenant project isolation |
+| `api_keys` | Hashed API key storage |
+| `evaluation_runs` | Evaluation results + input |
+| `metric_results` | Individual metric scores |
+| `evaluation_jobs` | Async job lifecycle |
+| `quality_gates` | Threshold configurations |
+| `evaluation_baselines` | Baseline run markers |
 
-### Baselines & Regression Detection
-
-- Mark any evaluation run as a baseline
-- Compare subsequent runs against baselines
-- Metric-aware direction: understands higher-is-better vs lower-is-better
-- Configurable tolerances per metric
-- Produces regression and improvement reports
-
-## Database Schema (Phase 2 additions)
-
-### `evaluation_jobs`
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID (PK) | Unique job identifier |
-| `created_at` | DateTime(tz) | UTC creation timestamp |
-| `started_at` | DateTime(tz) | When worker began processing |
-| `completed_at` | DateTime(tz) | When job finished |
-| `status` | String(20) | queued/running/completed/failed/cancelled |
-| `total_items` | Integer | Total evaluation cases |
-| `completed_items` | Integer | Successfully processed |
-| `failed_items` | Integer | Failed during processing |
-| `error_message` | String(1000) | Error details if failed |
-| `items` | JSONB | Input evaluation cases |
-| `evaluation_run_id` | UUID (FK) | Associated run |
-| `quality_gate_id` | UUID (FK) | Associated quality gate |
-| `batch_results` | JSONB | Per-item results |
-
-### `quality_gates`
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID (PK) | Unique gate identifier |
-| `created_at` | DateTime(tz) | Creation timestamp |
-| `name` | String(100) | Unique gate name |
-| `thresholds` | JSONB | Per-metric threshold config |
-| `enabled` | Boolean | Whether gate is active |
-
-### `evaluation_baselines`
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID (PK) | Unique baseline identifier |
-| `created_at` | DateTime(tz) | Creation timestamp |
-| `name` | String(100) | Unique baseline name |
-| `description` | String(500) | Description |
-| `run_id` | UUID (FK) | The run marked as baseline |
-
-### `evaluation_runs` (modified)
-
-| New Column | Type | Description |
-|-----------|------|-------------|
-| `is_baseline` | Boolean | Whether this run is a baseline |
-
-## Redis Usage
-
-| Key Pattern | Purpose | TTL |
-|------------|---------|-----|
-| `llm_eval:jobs:queue` | Job ID queue (list) | Persistent |
-| `llm_eval:jobs:state:{id}` | Job state JSON | 24h |
-| `llm_eval:jobs:progress:{id}` | Progress JSON | 24h |
-
-## Migration History
+### 4. Async Processing (`Redis` + `arq`)
 
 ```
-<base> → 001_initial (evaluation_runs)
-  → 002_phase2 (evaluation_jobs, quality_gates, evaluation_baselines, is_baseline)
+API → Redis Queue → arq Worker → Evaluation → PostgreSQL
 ```
+
+- **Job queue** via Redis lists (`blpop`)
+- **Job state** in Redis (24h TTL)
+- **Worker concurrency** configurable via `WORKER_CONCURRENCY`
+- **Bounded retries** via `WORKER_MAX_RETRIES`
+- **Cooperative cancellation** checked before each item
+
+### 5. Quality Gates
+
+Threshold-based pass/fail determination:
+```json
+{
+  "relevance": {"value": 0.80, "direction": "higher_is_better"},
+  "latency_ms": {"value": 2000, "direction": "lower_is_better"}
+}
+```
+
+Supports all metrics with correct directional comparison.
+
+### 6. Baseline Comparison
+
+Regression detection compares metric scores between baseline and current runs:
+- Correctly handles higher-is-better (relevance, faithfulness) and lower-is-better (latency, cost) metrics
+- Configurable tolerance thresholds
+- Identifies specific metric regressions and improvements
+
+### 7. Observability
+
+- **Prometheus** — API request counts/latency, evaluation metrics, worker metrics, judge metrics
+- **OpenTelemetry** — Distributed tracing with safe attributes
+- **Structured Logging** — JSON logs with request_id, job_id, run_id, duration
+- **Grafana** — Pre-configured dashboards via `docker-compose.prod.yml`
+
+### 8. Dashboard (React/Next.js)
+
+Production-quality dashboard with:
+- Overview stats and recent runs
+- Run detail with metric visualization
+- Job monitoring
+- Quality gate configuration view
+- Baseline management
+- Evaluation profile browser
+
+## Security
+
+- API keys stored as SHA-256 hashes (never plaintext)
+- Project-level resource isolation
+- Rate limiting on all API endpoints
+- CORS restricted to configured origins
+- Non-root Docker containers
+- Parameterized database queries
+- Request-size limits
+- Structured error responses (no stack traces)
+
+## Migration Strategy
+
+All database changes go through Alembic:
+```
+001_initial → 002_phase2 → 003_phase3 → 004_phase4
+```
+
+Migrations are linear, reversible, and never modify historical migrations.
 
 ## Scaling Notes
 
-- Worker concurrency via `WORKER_CONCURRENCY` env var
-- Redis handles temporary job state (TTL 24h)
-- PostgreSQL is source of truth for persistent data
-- Batch evaluations process items sequentially within a job
-- Future: batch NLI queries, ONNX runtime, async evaluation
+- **Horizontal scaling**: Add API instances behind a load balancer
+- **Worker scaling**: Increase `WORKER_CONCURRENCY` or add worker containers
+- **Database**: Use managed PostgreSQL (AWS RDS, Supabase, etc.)
+- **Redis**: Use managed Redis (Upstash, ElastiCache, etc.)
+- **Dashboard**: Static export to Vercel/Netlify for zero-infrastructure frontend

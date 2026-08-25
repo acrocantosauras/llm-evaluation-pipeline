@@ -38,6 +38,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       APP_ENV: development
       LOG_LEVEL: info
+    volumes:
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +60,9 @@ services:
       APP_ENV: development
       LOG_LEVEL: info
       WORKER_CONCURRENCY: "2"
+    volumes:
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,3 +1,5 @@
+"""Tests for relevance evaluator."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,26 +9,19 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_cosine_similarity(score_value):
-    """Return a mock util.cos_sim that yields a fixed similarity score."""
-
-    class MockTensor:
-        def __init__(self, val):
-            self._val = val
-
-        def item(self):
-            return self._val
-
-    def fake_cos_sim(a, b):
-        return MockTensor(score_value)
-
-    return fake_cos_sim
+def _mock_relevance_module():
+    """Mock the sentence_transformers dependencies for evaluator.relevance."""
+    mock_model = MagicMock()
+    mock_util = MagicMock()
+    return mock_model, mock_util
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_similar_text(mock_model, mock_util):
+def test_relevance_similar_text(mock_util, mock_get_model):
     """Similar texts should produce a high relevance score (> 0.5)."""
+    mock_model = MagicMock()
+    mock_get_model.return_value = mock_model
     mock_model.encode.return_value = MagicMock()
     mock_util.cos_sim.return_value = MagicMock()
     mock_util.cos_sim.return_value.item.return_value = 0.8
@@ -39,10 +34,12 @@ def test_relevance_similar_text(mock_model, mock_util):
     assert 0.0 <= score <= 1.0
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_unrelated_text(mock_model, mock_util):
+def test_relevance_unrelated_text(mock_util, mock_get_model):
     """Unrelated texts should produce a lower relevance score."""
+    mock_model = MagicMock()
+    mock_get_model.return_value = mock_model
     mock_model.encode.return_value = MagicMock()
     mock_util.cos_sim.return_value = MagicMock()
     mock_util.cos_sim.return_value.item.return_value = -0.3
@@ -54,32 +51,32 @@ def test_relevance_unrelated_text(mock_model, mock_util):
     assert score < 0.5
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_empty_answer(mock_model, mock_util):
+def test_relevance_empty_answer(mock_util, mock_get_model):
     """Empty answer should return 0.0 without calling the model."""
     from evaluator.relevance import relevance_score
 
     ctx = {"chunks": [{"text": "Some context."}]}
     score = relevance_score("", ctx)
     assert score == 0.0
-    mock_model.encode.assert_not_called()
+    mock_get_model.assert_not_called()
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_empty_context(mock_model, mock_util):
+def test_relevance_empty_context(mock_util, mock_get_model):
     """Empty context should return 0.0 without calling the model."""
     from evaluator.relevance import relevance_score
 
     score = relevance_score("Some answer.", {})
     assert score == 0.0
-    mock_model.encode.assert_not_called()
+    mock_get_model.assert_not_called()
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_none_answer(mock_model, mock_util):
+def test_relevance_none_answer(mock_util, mock_get_model):
     """None/falsy answer should return 0.0."""
     from evaluator.relevance import relevance_score
 
@@ -88,10 +85,12 @@ def test_relevance_none_answer(mock_model, mock_util):
     assert score == 0.0
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_score_range(mock_model, mock_util):
+def test_relevance_score_range(mock_util, mock_get_model):
     """Score should always be in [0, 1] range after normalisation."""
+    mock_model = MagicMock()
+    mock_get_model.return_value = mock_model
     mock_model.encode.return_value = MagicMock()
     mock_util.cos_sim.return_value = MagicMock()
     mock_util.cos_sim.return_value.item.return_value = 0.0  # cosine sim = 0
@@ -104,10 +103,12 @@ def test_relevance_score_range(mock_model, mock_util):
     assert score == 0.5
 
 
+@patch("evaluator.relevance._get_model")
 @patch("evaluator.relevance.util")
-@patch("evaluator.relevance.model")
-def test_relevance_multiple_chunks(mock_model, mock_util):
+def test_relevance_multiple_chunks(mock_util, mock_get_model):
     """Multiple context chunks should be concatenated."""
+    mock_model = MagicMock()
+    mock_get_model.return_value = mock_model
     mock_model.encode.return_value = MagicMock()
     mock_util.cos_sim.return_value = MagicMock()
     mock_util.cos_sim.return_value.item.return_value = 0.6

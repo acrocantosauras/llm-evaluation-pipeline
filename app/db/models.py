@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +12,45 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ── Auth & Projects ────────────────────────────────────────────────────────────
+
+
+class Project(Base):
+    """Project/workspace that owns all resources."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), default="")
+
+    # Relationships
+    api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="project")
+
+
+class ApiKey(Base):
+    """API key for project authentication."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="api_keys")
+
+
+# ── Evaluation Resources ───────────────────────────────────────────────────────
+
+
 class EvaluationRun(Base):
     """Stores a single evaluation run with its input and results."""
 
@@ -19,6 +58,9 @@ class EvaluationRun(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(20), default="completed")
     is_baseline: Mapped[bool] = mapped_column(default=False)
     profile: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -56,7 +98,6 @@ class MetricResultRecord(Base):
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
-    # Relationships
     evaluation_run: Mapped["EvaluationRun"] = relationship(back_populates="metric_results")
 
 
@@ -69,29 +110,27 @@ class EvaluationJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
 
-    # Progress tracking
     total_items: Mapped[int] = mapped_column(Integer, default=0)
     completed_items: Mapped[int] = mapped_column(Integer, default=0)
     failed_items: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
-    # Input
     items: Mapped[dict] = mapped_column(JSON, nullable=False)
 
-    # Results
     evaluation_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluation_runs.id"), nullable=True
     )
     evaluation_run: Mapped["EvaluationRun | None"] = relationship(back_populates="job")
 
-    # Quality gate
     quality_gate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("quality_gates.id"), nullable=True
     )
 
-    # Batch results
     batch_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
@@ -102,6 +141,9 @@ class QualityGate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     thresholds: Mapped[dict] = mapped_column(JSON, nullable=False)
     enabled: Mapped[bool] = mapped_column(default=True)
@@ -114,6 +156,9 @@ class EvaluationBaseline(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(String(500), default="")
     run_id: Mapped[uuid.UUID] = mapped_column(

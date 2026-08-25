@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -21,3 +21,12 @@ def readiness_check(db: Session = Depends(get_db)) -> dict:
         return {"status": "ready", "database": "connected"}
     except Exception:
         return {"status": "not ready", "database": "disconnected"}
+
+
+@router.get("/metrics")
+def prometheus_metrics() -> Response:
+    """Prometheus metrics endpoint."""
+    from app.observability.metrics import get_metrics_response
+
+    body, content_type = get_metrics_response()
+    return Response(content=body, media_type=content_type)

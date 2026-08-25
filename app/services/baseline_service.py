@@ -27,15 +27,21 @@ def create_baseline(
     run_id: uuid.UUID,
     name: str,
     description: str = "",
+    project_id: uuid.UUID | None = None,
 ) -> EvaluationBaseline:
     """Mark an evaluation run as a baseline."""
     run = db.query(EvaluationRun).filter(EvaluationRun.id == run_id).first()
     if not run:
         raise ValueError(f"Run {run_id} not found")
 
+    # Verify run belongs to the same project if scoped
+    if project_id is not None and run.project_id != project_id:
+        raise ValueError(f"Run {run_id} not found")
+
     baseline = EvaluationBaseline(
         id=uuid.uuid4(),
         created_at=datetime.now(timezone.utc),
+        project_id=project_id,
         name=name,
         description=description,
         run_id=run_id,
@@ -47,19 +53,28 @@ def create_baseline(
     return baseline
 
 
-def get_baseline(db: Session, baseline_id: uuid.UUID) -> EvaluationBaseline | None:
-    """Get a baseline by ID."""
-    return db.query(EvaluationBaseline).filter(EvaluationBaseline.id == baseline_id).first()
+def get_baseline(db: Session, baseline_id: uuid.UUID, project_id: uuid.UUID | None = None) -> EvaluationBaseline | None:
+    """Get a baseline by ID, optionally scoped to a project."""
+    query = db.query(EvaluationBaseline).filter(EvaluationBaseline.id == baseline_id)
+    if project_id is not None:
+        query = query.filter(EvaluationBaseline.project_id == project_id)
+    return query.first()
 
 
-def get_baseline_by_name(db: Session, name: str) -> EvaluationBaseline | None:
-    """Get a baseline by name."""
-    return db.query(EvaluationBaseline).filter(EvaluationBaseline.name == name).first()
+def get_baseline_by_name(db: Session, name: str, project_id: uuid.UUID | None = None) -> EvaluationBaseline | None:
+    """Get a baseline by name, optionally scoped to a project."""
+    query = db.query(EvaluationBaseline).filter(EvaluationBaseline.name == name)
+    if project_id is not None:
+        query = query.filter(EvaluationBaseline.project_id == project_id)
+    return query.first()
 
 
-def list_baselines(db: Session) -> list[EvaluationBaseline]:
-    """List all baselines."""
-    return db.query(EvaluationBaseline).order_by(EvaluationBaseline.created_at.desc()).all()
+def list_baselines(db: Session, project_id: uuid.UUID | None = None) -> list[EvaluationBaseline]:
+    """List all baselines, optionally scoped to a project."""
+    query = db.query(EvaluationBaseline)
+    if project_id is not None:
+        query = query.filter(EvaluationBaseline.project_id == project_id)
+    return query.order_by(EvaluationBaseline.created_at.desc()).all()
 
 
 def detect_regressions(

@@ -21,11 +21,13 @@ def create_job(
     db: Session,
     items: list[dict],
     quality_gate_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> EvaluationJob:
     """Create a new evaluation job."""
     job = EvaluationJob(
         id=uuid.uuid4(),
         created_at=datetime.now(timezone.utc),
+        project_id=project_id,
         status="queued",
         total_items=len(items),
         completed_items=0,
@@ -39,9 +41,12 @@ def create_job(
     return job
 
 
-def get_job(db: Session, job_id: uuid.UUID) -> EvaluationJob | None:
+def get_job(db: Session, job_id: uuid.UUID, project_id: uuid.UUID | None = None) -> EvaluationJob | None:
     """Get a job by ID, with live progress from Redis (if available)."""
-    job = db.query(EvaluationJob).filter(EvaluationJob.id == job_id).first()
+    query = db.query(EvaluationJob).filter(EvaluationJob.id == job_id)
+    if project_id is not None:
+        query = query.filter(EvaluationJob.project_id == project_id)
+    job = query.first()
     if job:
         from app.services.redis_queue import get_job_progress, get_job_state
 
@@ -60,14 +65,21 @@ def list_jobs(
     db: Session,
     offset: int = 0,
     limit: int = 20,
+    project_id: uuid.UUID | None = None,
 ) -> list[EvaluationJob]:
-    """List jobs with pagination."""
-    return db.query(EvaluationJob).order_by(EvaluationJob.created_at.desc()).offset(offset).limit(limit).all()
+    """List jobs with pagination, optionally scoped to a project."""
+    query = db.query(EvaluationJob)
+    if project_id is not None:
+        query = query.filter(EvaluationJob.project_id == project_id)
+    return query.order_by(EvaluationJob.created_at.desc()).offset(offset).limit(limit).all()
 
 
-def count_jobs(db: Session) -> int:
-    """Count total jobs."""
-    return db.query(EvaluationJob).count()
+def count_jobs(db: Session, project_id: uuid.UUID | None = None) -> int:
+    """Count total jobs, optionally scoped to a project."""
+    query = db.query(EvaluationJob)
+    if project_id is not None:
+        query = query.filter(EvaluationJob.project_id == project_id)
+    return query.count()
 
 
 def mark_job_started(db: Session, job_id: uuid.UUID) -> None:

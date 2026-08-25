@@ -1,28 +1,40 @@
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_project, rate_limit_api
 from app.api.schemas.evaluations import (
     EvaluationRequest,
     EvaluationResponse,
     MetricResultSchema,
 )
+from app.db.models import Project
 from app.db.session import get_db
+from app.observability import metrics
 from app.services.evaluation_service import get_metric_results, run_evaluation
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["evaluations"])
+router = APIRouter(prefix="/api/v1", tags=["evaluations"], dependencies=[Depends(rate_limit_api)])
 
 
 @router.post("/evaluations", response_model=EvaluationResponse, status_code=201)
-def create_evaluation(request: EvaluationRequest, db: Session = Depends(get_db)) -> EvaluationResponse:
+def create_evaluation(
+    request: EvaluationRequest,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
+) -> EvaluationResponse:
     """Submit an evaluation request.
 
     Runs the evaluation engine and persists the result.
     Supports profiles: basic, rag, rag_strict, judge.
+    Requires authentication.
     """
+    profile = request.profile
+    metrics.inc_evaluations_started(profile)
+    started = time.time()
     try:
         conversation = {
             "model_response": request.conversation.model_response,
@@ -43,6 +55,7 @@ def create_evaluation(request: EvaluationRequest, db: Session = Depends(get_db))
             context,
             profile=request.profile,
             judge_config=request.judge_config,
+            project_id=project.id,
         )
 
         # Get advanced metric results
@@ -59,6 +72,9 @@ def create_evaluation(request: EvaluationRequest, db: Session = Depends(get_db))
             for m in metric_records
         ]
 
+        metrics.inc_evaluations_completed(profile)
+        metrics.observe_evaluation_duration(profile, time.time() - started)
+
         return EvaluationResponse(
             run_id=run.id,
             status=run.status,
@@ -74,5 +90,6 @@ def create_evaluation(request: EvaluationRequest, db: Session = Depends(get_db))
             created_at=run.created_at,
         )
     except Exception as exc:
+        metrics.inc_evaluations_failed(profile)
         logger.exception("Evaluation failed")
         raise HTTPException(status_code=500, detail="Evaluation processing failed") from exc

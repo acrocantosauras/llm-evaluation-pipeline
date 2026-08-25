@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import get_settings
 from app.core.enums import JobStatus
 from app.db.models import EvaluationJob, EvaluationRun  # noqa: F401
+from app.observability import metrics
 from app.services.redis_queue import (
     get_job_state,
     set_job_progress,
@@ -36,7 +38,10 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
     """
     db = SessionLocal()
     retry_count = ctx.get("job_try", 1)
+    job_started = time.time()
     logger.info("Starting job %s (attempt %d)", job_id, retry_count)
+    if retry_count > 1:
+        metrics.inc_job_retries()
 
     try:
         # Check if already completed (idempotency)
@@ -80,15 +85,19 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
                 from evaluator.pipeline import EvaluationPipeline
 
                 pipeline = EvaluationPipeline()
-                result = pipeline.evaluate(item["conversation"], item["context"])
+                # The pipeline expects context as {"chunks": [...]}, matching the
+                # sync path (app/api/routes/evaluations.py). Batch items carry
+                # context as a bare list[ContextChunk], so wrap it here.
+                result = pipeline.evaluate(item["conversation"], {"chunks": item["context"]})
 
                 # Persist individual run
                 run = EvaluationRun(
                     id=uuid.uuid4(),
                     created_at=datetime.now(timezone.utc),
+                    project_id=job.project_id,
                     status="completed",
                     conversation=item["conversation"],
-                    context=item["context"],
+                    context={"chunks": item["context"]},
                     relevance=result.get("relevance"),
                     hallucination=result.get("hallucination"),
                     latency_ms=result.get("latency_ms"),
@@ -118,6 +127,8 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
         job.batch_results = {"results": batch_results}
         db.commit()
         set_job_state(job_id, JobStatus.COMPLETED, completed=completed, failed=failed)
+        metrics.inc_jobs_completed()
+        metrics.observe_job_duration(time.time() - job_started)
 
         logger.info(
             "Job %s completed: %d/%d succeeded, %d failed",
@@ -145,6 +156,7 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
         if retry_count < max_retries:
             raise  # arq will retry
 
+        metrics.inc_jobs_failed()
         return {"status": "failed", "error": str(exc)[:500]}
 
     finally:
@@ -153,11 +165,23 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
 
 async def startup(ctx: dict) -> None:
     """Worker startup hook."""
+    # Expose a Prometheus metrics endpoint so Prometheus can scrape the worker
+    # at worker:8000/metrics (see config/prometheus.yml). Runs in a background
+    # thread and does not interfere with the arq asyncio event loop.
+    try:
+        from prometheus_client import start_http_server
+
+        start_http_server(8000)
+        logger.info("Worker metrics server listening on :8000/metrics")
+    except Exception:
+        logger.warning("Could not start worker metrics server", exc_info=True)
+    metrics.set_active_workers(settings.WORKER_CONCURRENCY)
     logger.info("Worker starting up")
 
 
 async def shutdown(ctx: dict) -> None:
     """Worker shutdown hook."""
+    metrics.set_active_workers(0)
     logger.info("Worker shutting down")
 
 
@@ -173,3 +197,11 @@ class WorkerSettings:
     max_tries = settings.WORKER_MAX_RETRIES
     job_timeout = 300  # 5 minutes per job
     health_check_interval = 10
+
+
+if __name__ == "__main__":
+    # Entrypoint for `python -m app.worker` (used by docker-compose.prod.yml).
+    # Mirrors the dev-stack command `arq app.worker.WorkerSettings`.
+    from arq import run_worker
+
+    run_worker(WorkerSettings)

@@ -4,13 +4,16 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_project, rate_limit_api
 from app.api.schemas.baselines import QualityGateResult
 from app.api.schemas.jobs import (
     AsyncEvaluationRequest,
     JobResponse,
     PaginatedJobsResponse,
 )
+from app.db.models import Project
 from app.db.session import get_db
+from app.observability import metrics
 from app.services import redis_queue
 from app.services.job_service import (
     count_jobs,
@@ -22,25 +25,28 @@ from app.services.quality_gate_service import evaluate_gate
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["jobs"])
+router = APIRouter(prefix="/api/v1", tags=["jobs"], dependencies=[Depends(rate_limit_api)])
 
 
 @router.post("/evaluations/async", response_model=JobResponse, status_code=202)
 def submit_async_evaluation(
     request: AsyncEvaluationRequest,
     db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
 ) -> JobResponse:
     """Submit an asynchronous batch evaluation.
 
     Returns immediately with a job_id. The worker will process items
     in the background.
+    Requires authentication.
     """
     items = [item.model_dump() for item in request.items]
 
-    job = create_job(db, items, quality_gate_id=request.quality_gate_id)
+    job = create_job(db, items, quality_gate_id=request.quality_gate_id, project_id=project.id)
 
-    # Enqueue in Redis
-    redis_queue.enqueue_job(str(job.id))
+    # Dispatch to the arq worker pool
+    redis_queue.dispatch_job(str(job.id))
+    metrics.inc_jobs_queued()
 
     return JobResponse(
         job_id=job.id,
@@ -51,9 +57,13 @@ def submit_async_evaluation(
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-def get_job_status(job_id: uuid.UUID, db: Session = Depends(get_db)) -> JobResponse:
+def get_job_status(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
+) -> JobResponse:
     """Get the status and progress of an evaluation job."""
-    job = get_job(db, job_id)
+    job = get_job(db, job_id, project_id=project.id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
@@ -79,9 +89,13 @@ def get_job_status(job_id: uuid.UUID, db: Session = Depends(get_db)) -> JobRespo
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
-def cancel_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> JobResponse:
+def cancel_job(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
+) -> JobResponse:
     """Cancel a pending or running evaluation job."""
-    job = get_job(db, job_id)
+    job = get_job(db, job_id, project_id=project.id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
@@ -117,10 +131,11 @@ def list_evaluation_jobs(
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
 ) -> PaginatedJobsResponse:
     """List evaluation jobs with pagination."""
-    jobs = list_jobs(db, offset=offset, limit=limit)
-    total = count_jobs(db)
+    jobs = list_jobs(db, offset=offset, limit=limit, project_id=project.id)
+    total = count_jobs(db, project_id=project.id)
 
     job_responses = []
     for job in jobs:
@@ -147,9 +162,13 @@ def list_evaluation_jobs(
 
 
 @router.get("/jobs/{job_id}/quality-gate", response_model=QualityGateResult)
-def get_job_quality_gate(job_id: uuid.UUID, db: Session = Depends(get_db)) -> QualityGateResult:
+def get_job_quality_gate(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
+) -> QualityGateResult:
     """Get the quality gate result for a completed job."""
-    job = get_job(db, job_id)
+    job = get_job(db, job_id, project_id=project.id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 

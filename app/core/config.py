@@ -28,8 +28,20 @@ class Settings(BaseSettings):
     JUDGE_MAX_RETRIES: int = 3
     JUDGE_TIMEOUT: float = 30.0
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    # Rate Limiting
+    RATE_LIMIT_REQUESTS: int = 100
+    RATE_LIMIT_WINDOW: float = 60.0
+
+    # CORS (production should NOT use ["*"])
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    # Observability
+    PROMETHEUS_ENABLED: bool = True
+    OPENTELEMETRY_ENABLED: bool = False
+    OPENTELEMETRY_ENDPOINT: str = "http://localhost:4317"
+
+    # Dashboard
+    DASHBOARD_URL: str = "http://localhost:3000"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

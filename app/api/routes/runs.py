@@ -3,12 +3,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_project, rate_limit_api
 from app.api.schemas.evaluations import MetricResultSchema
 from app.api.schemas.runs import PaginatedRunsResponse, RunResponse
+from app.db.models import Project
 from app.db.session import get_db
 from app.services.evaluation_service import count_runs, get_metric_results, get_run, list_runs
 
-router = APIRouter(prefix="/api/v1", tags=["runs"])
+router = APIRouter(prefix="/api/v1", tags=["runs"], dependencies=[Depends(rate_limit_api)])
 
 
 def _run_to_response(run) -> RunResponse:
@@ -42,14 +44,18 @@ def _run_to_response(run) -> RunResponse:
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
-def get_evaluation_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunResponse:
+def get_evaluation_run(
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
+) -> RunResponse:
     """Retrieve a specific evaluation run by ID."""
-    run = get_run(db, run_id)
+    run = get_run(db, run_id, project_id=project.id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
     # Eagerly load metric_results
-    metric_records = get_metric_results(db, run_id)
+    metric_records = get_metric_results(db, run_id, project_id=project.id)
     run.metric_results = metric_records
 
     return _run_to_response(run)
@@ -60,10 +66,11 @@ def get_evaluation_runs(
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(20, ge=1, le=100, description="Maximum records to return"),
     db: Session = Depends(get_db),
+    project: Project = Depends(get_current_project),
 ) -> PaginatedRunsResponse:
     """List evaluation runs with pagination."""
-    runs = list_runs(db, offset=offset, limit=limit)
-    total = count_runs(db)
+    runs = list_runs(db, offset=offset, limit=limit, project_id=project.id)
+    total = count_runs(db, project_id=project.id)
     return PaginatedRunsResponse(
         runs=[_run_to_response(r) for r in runs],
         total=total,

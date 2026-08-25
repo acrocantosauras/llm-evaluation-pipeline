@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any
@@ -8,7 +9,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Redis key prefixes
+# Redis key prefixes (used for state/progress tracking alongside arq)
 JOB_QUEUE_KEY = "llm_eval:jobs:queue"
 JOB_STATE_KEY = "llm_eval:jobs:state:{job_id}"
 JOB_PROGRESS_KEY = "llm_eval:jobs:progress:{job_id}"
@@ -28,8 +29,40 @@ def get_redis_client() -> redis.Redis:
     )
 
 
+def dispatch_job(job_id: str) -> None:
+    """Dispatch a job to the arq worker pool (production async path).
+
+    The arq worker consumes ``process_evaluation_job`` from its own queue;
+    this is what the API uses to schedule background evaluation work.
+    """
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    settings = get_settings()
+    redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
+
+    async def _dispatch() -> None:
+        pool = await create_pool(redis_settings)
+        try:
+            await pool.enqueue_job("process_evaluation_job", job_id)
+        finally:
+            # redis-py >= 5.0.1 renamed close() -> aclose(); support both.
+            close = getattr(pool, "aclose", None) or pool.close
+            await close()
+
+    # Use a dedicated event loop — safe in sync FastAPI endpoints (threadpool)
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_dispatch())
+    finally:
+        loop.close()
+
+    set_job_state(job_id, "queued")
+    logger.info("Job %s dispatched to arq pool", job_id)
+
+
 def enqueue_job(job_id: str) -> None:
-    """Push a job ID onto the queue."""
+    """Push a job ID onto the Redis list queue (FIFO) and mark it queued."""
     r = get_redis_client()
     r.rpush(JOB_QUEUE_KEY, job_id)
     set_job_state(job_id, "queued")
@@ -37,7 +70,7 @@ def enqueue_job(job_id: str) -> None:
 
 
 def dequeue_job() -> str | None:
-    """Pop a job ID from the queue (blocking with timeout)."""
+    """Pop a job ID from the Redis list queue (blocking with timeout)."""
     r = get_redis_client()
     result = r.blpop(JOB_QUEUE_KEY, timeout=5)
     if result:

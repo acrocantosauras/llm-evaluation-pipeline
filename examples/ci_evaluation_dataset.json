@@ -1,0 +1,57 @@
+{
+  "name": "CI Evaluation Dataset",
+  "description": "Safe synthetic dataset for CI quality gates. No confidential data.",
+  "profile": "basic",
+  "quality_thresholds": {
+    "relevance": {
+      "value": 0.3,
+      "direction": "higher_is_better"
+    },
+    "latency": {
+      "value": 0.0,
+      "direction": "higher_is_better"
+    },
+    "cost": {
+      "value": 0.0,
+      "direction": "higher_is_better"
+    }
+  },
+  "items": [
+    {
+      "name": "medical-info",
+      "sample": {
+        "question": "What are the common side effects of ibuprofen?",
+        "answer": "Common side effects of ibuprofen include stomach upset, nausea, dizziness, and headache. It may also cause drowsiness and allergic reactions in some people.",
+        "context": [
+          "Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID). Common side effects include gastrointestinal issues such as stomach pain, nausea, and indigestion.",
+          "Some patients may experience dizziness, headache, or allergic reactions when taking ibuprofen."
+        ],
+        "reference_answer": "Stomach upset, nausea, dizziness, headache, and allergic reactions."
+      }
+    },
+    {
+      "name": "tech-docs",
+      "sample": {
+        "question": "How does Docker Compose health checks work?",
+        "answer": "Docker Compose health checks use a command defined in the service configuration. The container runs the command periodically, and based on the exit code, Docker marks the container as healthy, unhealthy, or starting. Services can depend on other services being healthy before starting.",
+        "context": [
+          "Docker Compose health checks are configured per-service using the healthcheck directive. A test command is run at specified intervals.",
+          "The health check returns healthy if the exit code is 0, unhealthy if non-zero. Services with depends_on can wait for healthy status."
+        ],
+        "reference_answer": "Health checks run a command periodically and check the exit code to determine container health status."
+      }
+    },
+    {
+      "name": "general-knowledge",
+      "sample": {
+        "question": "What is the purpose of unit testing?",
+        "answer": "Unit testing verifies that individual components of software work correctly in isolation. They help catch bugs early, serve as documentation, and enable safe refactoring.",
+        "context": [
+          "Unit tests are software tests that verify individual units of source code function correctly.",
+          "Benefits include early bug detection, living documentation, and enabling confident code changes."
+        ],
+        "reference_answer": "Unit testing verifies individual software components work correctly and helps catch bugs early."
+      }
+    }
+  ]
+}
