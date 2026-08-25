@@ -38,6 +38,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       APP_ENV: development
       LOG_LEVEL: info
+      # Dev-only convenience; never honored when APP_ENV=production/ci.
+      ALLOW_DEV_AUTH_FALLBACK: "true"
     volumes:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini

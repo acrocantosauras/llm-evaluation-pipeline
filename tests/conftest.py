@@ -10,6 +10,8 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["APP_ENV"] = "development"
 os.environ["LOG_LEVEL"] = "warning"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+# The unauthenticated dev fallback must be explicitly enabled — tests opt in here.
+os.environ["ALLOW_DEV_AUTH_FALLBACK"] = "true"
 
 
 VALID_REQUEST = {

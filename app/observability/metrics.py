@@ -139,6 +139,16 @@ def _ensure_metrics():
         "Number of active workers",
     )
 
+    # Rate limiter health
+    _metrics["rate_limited_total"] = Counter_(
+        "llm_eval_rate_limited_total",
+        "Requests rejected by the rate limiter",
+    )
+    _metrics["rate_limit_failures_total"] = Counter_(
+        "llm_eval_rate_limit_failures_total",
+        "Rate limiter Redis failures (fail-open or fail-closed)",
+    )
+
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -246,6 +256,20 @@ def set_active_workers(count: int) -> None:
     m = _metrics.get("active_workers")
     if m:
         m.set(count)
+
+
+def inc_rate_limited() -> None:
+    _ensure_metrics()
+    m = _metrics.get("rate_limited_total")
+    if m:
+        m.inc()
+
+
+def inc_rate_limit_failures() -> None:
+    _ensure_metrics()
+    m = _metrics.get("rate_limit_failures_total")
+    if m:
+        m.inc()
 
 
 def get_metrics_response() -> tuple[bytes, str]:

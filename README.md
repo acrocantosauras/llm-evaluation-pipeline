@@ -182,6 +182,11 @@ curl -X POST http://localhost:8000/api/v1/evaluations/async \
 | `CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed origins |
 | `RATE_LIMIT_REQUESTS` | `100` | Requests per window |
 | `RATE_LIMIT_WINDOW` | `60` | Rate limit window (seconds) |
+| `RATE_LIMIT_FAIL_CLOSED` | `false` | If `true`, return 503 when the Redis-backed limiter is unreachable; default fails **open** (documented tradeoff) |
+| `MAX_BATCH_ITEMS` | `100` | Max items per async batch submission |
+| `EVAL_MAX_CONCURRENCY` | `4` | Max concurrent blocking evaluations per API process |
+| `EVAL_SLOT_TIMEOUT` | `30` | Seconds to wait for an evaluation slot before returning 503 |
+| `ALLOW_DEV_AUTH_FALLBACK` | `false` | Explicit opt-in for the dev-only unauthenticated fallback. Never honored when `APP_ENV=production\|ci` |
 | `PROMETHEUS_ENABLED` | `true` | Enable metrics endpoint |
 | `OPENTELEMETRY_ENABLED` | `false` | Enable tracing |
 
@@ -227,7 +232,7 @@ evaluator/                   # Core evaluation engine
 ├── latency.py               # Execution timing
 └── cost.py                  # Token cost estimation
 dashboard/                   # React/Next.js dashboard
-alembic/                     # Database migrations (4)
+alembic/                     # Database migrations (5)
 tests/                       # 182 tests
 .github/workflows/           # CI evaluation quality gate
 config/                      # Prometheus + Grafana config
@@ -253,6 +258,48 @@ The repository includes a GitHub Actions workflow that:
 # .github/workflows/ci-evaluation.yml
 # Runs on every PR to main
 ```
+
+## Production Deployment
+
+### Required secrets (never committed)
+
+| Secret | Used by | Notes |
+|--------|---------|-------|
+| `POSTGRES_PASSWORD` | prod compose | Required — compose fails fast if missing |
+| `GRAFANA_PASSWORD` | prod compose | Required — no known defaults (`admin/admin`) are accepted |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | judge profile | Only needed for `profile=judge` |
+| API keys | clients | Created via `POST /api/v1/projects/{id}/api-keys`; shown exactly once |
+
+### Deployment sequence (migrations)
+
+Migrations are **decoupled from application startup** in production to avoid a
+migration race when scaling API replicas:
+
+1. `docker compose -f docker-compose.prod.yml up -d postgres redis`
+2. `docker compose -f docker-compose.prod.yml up migrate` — one-shot,
+   serialized `alembic upgrade head`; exits non-zero on failure
+3. `docker compose -f docker-compose.prod.yml up -d api worker` — these wait on
+   `migrate: service_completed_successfully`; safe to scale to N replicas
+
+The local development compose file keeps the convenient
+`alembic upgrade head && uvicorn` startup because it runs a single instance.
+
+### Network isolation
+
+In `docker-compose.prod.yml`, Postgres (5432) and Redis (6379) are **not**
+published to the host — only the internal Docker network. The only published
+ports are the intended entry points: API (8000), Grafana, Prometheus.
+For ad-hoc DB access use `docker compose exec postgres psql ...`.
+Put a TLS-terminating reverse proxy (Caddy/nginx/ALB) in front of the API port.
+
+## Future Production Infrastructure
+<arg_value><b88a6f17>Not implemented by design — deployment-scale concerns, not application blockers:
+
+- TLS/reverse proxy termination (run Caddy/nginx or a cloud load balancer in front)
+- HA PostgreSQL with automated failover, PITR / point-in-time backups
+- Redis persistence/replication or a managed Redis equivalent
+- Kubernetes manifests, autoscaling, multi-region routing
+- Audit-log platform, retention policies, webhook notifications
 
 ## Known Limitations
 

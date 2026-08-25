@@ -71,6 +71,13 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
         failed = 0
         batch_results = []
 
+        # Construct the pipeline once per job, not once per item. Model weights
+        # are module-level cached inside evaluator modules regardless, but this
+        # avoids repeated object setup on large batches.
+        from evaluator.pipeline import EvaluationPipeline
+
+        pipeline = EvaluationPipeline()
+
         for i, item in enumerate(items_data):
             # Check cancellation before each item
             if _is_cancelled(job_id):
@@ -82,15 +89,13 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
                 return {"status": "cancelled"}
 
             try:
-                from evaluator.pipeline import EvaluationPipeline
-
-                pipeline = EvaluationPipeline()
                 # The pipeline expects context as {"chunks": [...]}, matching the
                 # sync path (app/api/routes/evaluations.py). Batch items carry
                 # context as a bare list[ContextChunk], so wrap it here.
                 result = pipeline.evaluate(item["conversation"], {"chunks": item["context"]})
 
-                # Persist individual run
+                # Stage the individual run — committed below together with the
+                # job progress counters (single transaction per item instead of two).
                 run = EvaluationRun(
                     id=uuid.uuid4(),
                     created_at=datetime.now(timezone.utc),
@@ -104,7 +109,6 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
                     estimated_cost=result.get("estimated_cost"),
                 )
                 db.add(run)
-                db.commit()
 
                 batch_results.append({"run_id": str(run.id), "status": "completed"})
                 completed += 1
@@ -115,11 +119,14 @@ async def process_evaluation_job(ctx: dict, job_id: str, max_retries: int = 3) -
                 failed += 1
                 db.rollback()
 
-            # Update progress
-            set_job_progress(job_id, total, completed, failed)
+            # One transaction per item: persists the new EvaluationRun and the
+            # updated job counters atomically (previously two commits per item).
             job.completed_items = completed
             job.failed_items = failed
             db.commit()
+
+            # Update Redis progress (best-effort state for the API)
+            set_job_progress(job_id, total, completed, failed)
 
         # Mark job completed
         job.status = JobStatus.COMPLETED

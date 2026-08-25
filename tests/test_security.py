@@ -243,10 +243,7 @@ def _get_test_client(TestSession, app_env="production"):
 
     from fastapi.testclient import TestClient
 
-    # Clear the in-memory rate limiter from previous tests
-    import app.api.deps as _deps
-
-    _deps._rate_limits.clear()
+    # Fresh fakeredis per test — the Redis-backed rate limiter uses this client.
 
     client = TestClient(app, raise_server_exceptions=False)
     return client, app, rq, original_get_redis, fake, original_app_env

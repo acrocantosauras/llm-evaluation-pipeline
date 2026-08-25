@@ -2,13 +2,13 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_api_key, hash_api_key
+from app.core.security import generate_api_key, hash_api_key, key_prefix
 from app.db.models import ApiKey, Project
 from app.db.session import get_db
 
@@ -30,6 +30,12 @@ class ProjectResponse(BaseModel):
 
 class ApiKeyCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+    expires_in_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=3650,
+        description="Optional key lifetime in days. Omit for a non-expiring key.",
+    )
 
 
 class ApiKeyResponse(BaseModel):
@@ -39,6 +45,7 @@ class ApiKeyResponse(BaseModel):
     key_prefix: str
     enabled: bool
     created_at: datetime
+    expires_at: datetime | None = None
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
@@ -76,6 +83,31 @@ def get_project(project_id: uuid.UUID, db: Session = Depends(get_db)) -> Project
     )
 
 
+def _create_key_record(
+    db: Session, project_id: uuid.UUID, name: str, expires_in_days: int | None
+) -> tuple[ApiKey, str]:
+    """Create an ApiKey row; return (api_key, plaintext). Plaintext is never persisted or logged."""
+    plaintext_key = generate_api_key()
+    expires_at = None
+    if expires_in_days is not None:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+
+    api_key = ApiKey(
+        id=uuid.uuid4(),
+        created_at=datetime.now(timezone.utc),
+        project_id=project_id,
+        name=name,
+        key_hash=hash_api_key(plaintext_key),
+        key_prefix=key_prefix(plaintext_key),
+        enabled=True,
+        expires_at=expires_at,
+    )
+    db.add(api_key)
+    db.commit()
+    db.refresh(api_key)
+    return api_key, plaintext_key
+
+
 @router.post("/projects/{project_id}/api-keys", response_model=ApiKeyResponse, status_code=201)
 def create_api_key(project_id: uuid.UUID, request: ApiKeyCreate, db: Session = Depends(get_db)) -> ApiKeyResponse:
     """Create a new API key. The full key is returned ONLY on creation."""
@@ -83,28 +115,16 @@ def create_api_key(project_id: uuid.UUID, request: ApiKeyCreate, db: Session = D
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    plaintext_key = generate_api_key()
-    key_hash = hash_api_key(plaintext_key)
-
-    api_key = ApiKey(
-        id=uuid.uuid4(),
-        created_at=datetime.now(timezone.utc),
-        project_id=project_id,
-        name=request.name,
-        key_hash=key_hash,
-        enabled=True,
-    )
-    db.add(api_key)
-    db.commit()
-    db.refresh(api_key)
+    api_key, plaintext_key = _create_key_record(db, project_id, request.name, request.expires_in_days)
 
     return ApiKeyResponse(
         id=api_key.id,
         name=api_key.name,
         key=plaintext_key,
-        key_prefix=plaintext_key[:15] + "...",
+        key_prefix=api_key.key_prefix,
         enabled=api_key.enabled,
         created_at=api_key.created_at,
+        expires_at=api_key.expires_at,
     )
 
 
@@ -121,12 +141,48 @@ def list_api_keys(project_id: uuid.UUID, db: Session = Depends(get_db)) -> list[
             id=k.id,
             name=k.name,
             key=None,
-            key_prefix=k.key_hash[:10] + "...",
+            key_prefix=k.key_prefix or k.key_hash[:10] + "...",
             enabled=k.enabled,
             created_at=k.created_at,
+            expires_at=k.expires_at,
         )
         for k in keys
     ]
+
+
+@router.post("/projects/{project_id}/api-keys/{key_id}/rotate", response_model=ApiKeyResponse, status_code=201)
+def rotate_api_key(project_id: uuid.UUID, key_id: uuid.UUID, db: Session = Depends(get_db)) -> ApiKeyResponse:
+    """Rotate an API key: creates a replacement and disables the old key.
+
+    The new plaintext key is returned ONLY on this call. The old key stops
+    working immediately (revocation), enabling zero-downtime rotation by
+    creating the replacement first if desired via POST + DELETE instead.
+    """
+    api_key = db.query(ApiKey).filter(ApiKey.id == key_id, ApiKey.project_id == project_id).first()
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    # Inherit expiry policy of the rotated key (None stays non-expiring).
+    expires_in_days = None
+    if api_key.expires_at is not None:
+        remaining = (api_key.expires_at - datetime.now(timezone.utc)).days + 1
+        expires_in_days = max(1, remaining)
+
+    new_key, plaintext_key = _create_key_record(db, project_id, api_key.name, expires_in_days)
+
+    # Disable the old key after successful replacement
+    api_key.enabled = False
+    db.commit()
+
+    return ApiKeyResponse(
+        id=new_key.id,
+        name=new_key.name,
+        key=plaintext_key,
+        key_prefix=new_key.key_prefix,
+        enabled=new_key.enabled,
+        created_at=new_key.created_at,
+        expires_at=new_key.expires_at,
+    )
 
 
 @router.delete("/projects/{project_id}/api-keys/{key_id}", status_code=204)

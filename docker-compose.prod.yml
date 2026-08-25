@@ -1,5 +1,7 @@
 services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # NOT published to the host: reachable only on the internal Docker network.
+  # For ad-hoc debugging use: docker compose exec postgres psql ...
   postgres:
     image: postgres:16-alpine
     environment:
@@ -8,8 +10,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -18,11 +18,10 @@ services:
     restart: unless-stopped
 
   # ── Redis ───────────────────────────────────────────────────────────────────
+  # NOT published to the host: reachable only on the internal Docker network.
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,13 +29,28 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # ── Database Migrations (runs once per deployment, serialized) ─────────────
+  # Application replicas MUST NOT run migrations concurrently at startup.
+  # This one-shot service is the only place `alembic upgrade head` runs.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "alembic upgrade head"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-llm_eval}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   # ── FastAPI Application ─────────────────────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}"
+    # No migration here — see the `migrate` service. Safe to scale to N replicas.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-llm_eval}
       REDIS_URL: redis://redis:6379/0
@@ -55,6 +69,8 @@ services:
     volumes:
       - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -83,6 +99,8 @@ services:
     volumes:
       - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -106,7 +124,8 @@ services:
   grafana:
     image: grafana/grafana:latest
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Required secret — deployment fails fast rather than starting with a known default.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana

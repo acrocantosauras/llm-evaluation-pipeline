@@ -13,7 +13,11 @@ from app.api.schemas.evaluations import (
 from app.db.models import Project
 from app.db.session import get_db
 from app.observability import metrics
-from app.services.evaluation_service import get_metric_results, run_evaluation
+from app.services.evaluation_service import (
+    EvaluationBusyError,
+    get_metric_results,
+    run_evaluation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,15 @@ def create_evaluation(
             metric_results=metric_results,
             created_at=run.created_at,
         )
+    except EvaluationBusyError:
+        # Explicit overload behavior: bounded concurrency exceeded within the
+        # configured slot timeout. Client should retry later.
+        metrics.inc_evaluations_failed(profile)
+        raise HTTPException(
+            status_code=503,
+            detail="Evaluation server busy, retry later",
+            headers={"Retry-After": "5"},
+        ) from None
     except Exception as exc:
         metrics.inc_evaluations_failed(profile)
         logger.exception("Evaluation failed")

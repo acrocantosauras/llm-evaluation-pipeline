@@ -51,28 +51,42 @@ def test_key_is_not_stored_plaintext():
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting tests
+# Rate limiting tests (Redis-backed; see tests/test_rate_limiting.py for full coverage)
 # ---------------------------------------------------------------------------
 
 
-def test_rate_limit_allows_within_window():
+def test_rate_limit_allows_within_window(monkeypatch):
     """Requests within the limit are allowed."""
+    import fakeredis
+
     from app.api.deps import _check_rate_limit
+    from app.services import redis_queue as rq
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(rq, "get_redis_client", lambda: fake)
 
     key = str(uuid.uuid4())
     assert _check_rate_limit(key, 3, 60.0) is True
     assert _check_rate_limit(key, 3, 60.0) is True
     assert _check_rate_limit(key, 3, 60.0) is True
+    fake.flushall()
 
 
-def test_rate_limit_blocks_over_limit():
+def test_rate_limit_blocks_over_limit(monkeypatch):
     """Requests over the limit are blocked."""
+    import fakeredis
+
     from app.api.deps import _check_rate_limit
+    from app.services import redis_queue as rq
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(rq, "get_redis_client", lambda: fake)
 
     key = str(uuid.uuid4())
     assert _check_rate_limit(key, 2, 60.0) is True
     assert _check_rate_limit(key, 2, 60.0) is True
     assert _check_rate_limit(key, 2, 60.0) is False
+    fake.flushall()
 
 
 # ---------------------------------------------------------------------------

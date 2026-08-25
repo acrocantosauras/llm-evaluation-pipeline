@@ -41,8 +41,12 @@ class ApiKey(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Display prefix of the plaintext key (never enough to reconstruct it)
+    key_prefix: Mapped[str] = mapped_column(String(20), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional expiry — expired keys are rejected during authentication
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="api_keys")

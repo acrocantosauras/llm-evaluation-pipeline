@@ -1,11 +1,53 @@
+import threading
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import EvaluationRun, MetricResultRecord
 from evaluator.base import EvaluationSample
 from evaluator.pipeline import EvaluationPipeline
+
+
+class EvaluationBusyError(Exception):
+    """Raised when no evaluation slot could be acquired within the timeout."""
+
+
+# Process-level pipeline instance. EvaluationPipeline is stateless — the heavy
+# ML models it uses are themselves cached at module level inside the evaluator
+# modules — so constructing it once per process avoids repeated setup work.
+# Model weights are NOT reloaded per evaluation (verified: evaluator.relevance
+# caches a lazy module-global SentenceTransformer; evaluator.hallucination's
+# NLI pipeline is a module global).
+_pipeline_instance: EvaluationPipeline | None = None
+_pipeline_lock = threading.Lock()
+
+# Bounded concurrency for blocking CPU-bound inference on the API path.
+# The endpoint runs in Starlette's threadpool (sync def); this semaphore caps
+# how many evaluations execute concurrently per process so a burst of requests
+# cannot exhaust the shared threadpool.
+_eval_semaphore: threading.BoundedSemaphore | None = None
+_eval_semaphore_lock = threading.Lock()
+
+
+def _get_pipeline() -> EvaluationPipeline:
+    global _pipeline_instance
+    if _pipeline_instance is None:
+        with _pipeline_lock:
+            if _pipeline_instance is None:
+                _pipeline_instance = EvaluationPipeline()
+    return _pipeline_instance
+
+
+def _get_eval_semaphore() -> threading.BoundedSemaphore:
+    global _eval_semaphore
+    if _eval_semaphore is None:
+        with _eval_semaphore_lock:
+            if _eval_semaphore is None:
+                settings = get_settings()
+                _eval_semaphore = threading.BoundedSemaphore(max(1, settings.EVAL_MAX_CONCURRENCY))
+    return _eval_semaphore
 
 
 def run_evaluation(
@@ -29,28 +71,41 @@ def run_evaluation(
     Returns:
         The persisted EvaluationRun record.
     """
-    # Always run the legacy pipeline for backward compatibility
-    pipeline = EvaluationPipeline()
-    legacy_result = pipeline.evaluate(conversation, context)
+    # Acquire an evaluation slot (bounded CPU-bound concurrency).
+    # Blocks up to EVAL_SLOT_TIMEOUT seconds; raises EvaluationBusyError (→ 503)
+    # rather than queueing unbounded work.
+    settings = get_settings()
+    semaphore = _get_eval_semaphore()
+    if not semaphore.acquire(timeout=settings.EVAL_SLOT_TIMEOUT):
+        raise EvaluationBusyError(
+            f"Evaluation server busy: more than {settings.EVAL_MAX_CONCURRENCY} concurrent evaluations"
+        )
 
-    # Run advanced evaluators if profile is not "basic"
-    metric_results = []
-    composite_score = None
+    try:
+        # Always run the legacy pipeline for backward compatibility
+        pipeline = _get_pipeline()
+        legacy_result = pipeline.evaluate(conversation, context)
 
-    if profile and profile != "basic":
-        from evaluator.profiles import get_profile
-        from evaluator.registry import evaluate_with_profile
+        # Run advanced evaluators if profile is not "basic"
+        metric_results = []
+        composite_score = None
 
-        sample = _build_sample(conversation, context)
-        metric_results = evaluate_with_profile(profile, sample, judge_config=judge_config)
+        if profile and profile != "basic":
+            from evaluator.profiles import get_profile
+            from evaluator.registry import evaluate_with_profile
 
-        # Compute composite score if profile has weights
-        profile_config = get_profile(profile)
-        if profile_config and profile_config.composite_weights:
-            from evaluator.composite import compute_composite
+            sample = _build_sample(conversation, context)
+            metric_results = evaluate_with_profile(profile, sample, judge_config=judge_config)
 
-            composite_result = compute_composite(metric_results, profile_config.composite_weights)
-            composite_score = composite_result.get("composite_score")
+            # Compute composite score if profile has weights
+            profile_config = get_profile(profile)
+            if profile_config and profile_config.composite_weights:
+                from evaluator.composite import compute_composite
+
+                composite_result = compute_composite(metric_results, profile_config.composite_weights)
+                composite_score = composite_result.get("composite_score")
+    finally:
+        semaphore.release()
 
     # Create the run
     run = EvaluationRun(

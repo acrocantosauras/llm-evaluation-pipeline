@@ -13,6 +13,7 @@ Safety:
 import json
 import logging
 import os
+import time
 
 from .base import BaseEvaluator, EvaluationSample, MetricResult
 
@@ -65,7 +66,12 @@ class LLMJudgeEvaluator(BaseEvaluator):
 
         for attempt in range(self.max_retries):
             try:
+                # Measure the actual judge operation (the LLM call) with a
+                # monotonic clock so retries and parsing don't distort it.
+                call_started = time.perf_counter()
                 result = self._call_llm(prompt)
+                latency_ms = round((time.perf_counter() - call_started) * 1000, 4)
+
                 parsed = self._parse_response(result)
                 if parsed is not None:
                     score = parsed.get("score", 0) / 5.0  # Normalize to 0-1
@@ -77,7 +83,7 @@ class LLMJudgeEvaluator(BaseEvaluator):
                         criteria=parsed.get("criteria", {}),
                         provider=self.provider,
                         model=self.model,
-                        latency_ms=0,  # Latency tracked at evaluate() level
+                        latency_ms=latency_ms,
                     )
             except Exception as exc:
                 logger.warning("Judge attempt %d failed: %s", attempt + 1, exc)
