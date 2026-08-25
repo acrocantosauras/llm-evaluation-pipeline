@@ -193,7 +193,7 @@ curl -X POST http://localhost:8000/api/v1/evaluations/async \
 ## Running Tests
 
 ```bash
-pytest -q              # 182 tests
+pytest -q              # 215 tests
 ruff check .           # Linting
 ruff format --check .  # Formatting
 python main.py         # CLI smoke test
@@ -233,7 +233,7 @@ evaluator/                   # Core evaluation engine
 └── cost.py                  # Token cost estimation
 dashboard/                   # React/Next.js dashboard
 alembic/                     # Database migrations (5)
-tests/                       # 182 tests
+tests/                       # 215 tests
 .github/workflows/           # CI evaluation quality gate
 config/                      # Prometheus + Grafana config
 ├── prometheus.yml
@@ -293,13 +293,13 @@ For ad-hoc DB access use `docker compose exec postgres psql ...`.
 Put a TLS-terminating reverse proxy (Caddy/nginx/ALB) in front of the API port.
 
 ## Future Production Infrastructure
-<arg_value><b88a6f17>Not implemented by design — deployment-scale concerns, not application blockers:
+<arg_value><b88a6f17>The following are deployment-scale concerns that depend on the target infrastructure and service-level requirements, and are outside the current application scope:
 
-- TLS/reverse proxy termination (run Caddy/nginx or a cloud load balancer in front)
-- HA PostgreSQL with automated failover, PITR / point-in-time backups
-- Redis persistence/replication or a managed Redis equivalent
-- Kubernetes manifests, autoscaling, multi-region routing
-- Audit-log platform, retention policies, webhook notifications
+- High-availability PostgreSQL with automated failover
+- Automated backups / point-in-time recovery (PITR)
+- TLS termination / reverse proxy
+- Horizontal scaling and autoscaling
+- Cloud-specific deployment configuration
 
 ## Known Limitations
 
