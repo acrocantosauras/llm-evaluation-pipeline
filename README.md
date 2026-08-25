@@ -1,18 +1,20 @@
 # LLM Evaluation Platform
 
-A production-oriented LLM Evaluation & Quality-Gate Platform for measuring, comparing, and enforcing AI quality across the development lifecycle.
+A production-oriented LLM evaluation and quality-gate platform for RAG and LLM applications, with automated quality measurement, regression detection, CI/CD enforcement, and operational observability.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Technology Stack
+### Technology Stack
 
-**Backend:** FastAPI, Python, SQLAlchemy, PostgreSQL, Alembic  
-**Async Processing:** Redis, arq  
-**Evaluation:** Sentence Transformers, NLI, LLM-as-a-Judge  
+**Backend:** FastAPI, Python, Pydantic, SQLAlchemy, PostgreSQL, Alembic  
+**Async Processing:** Redis, arq, Background Workers, Batch Processing, Retries, Idempotency  
+**Evaluation:** Sentence Transformers, NLI, RAG Evaluation, LLM-as-a-Judge, Composite Scoring  
+**Quality Engineering:** Quality Gates, Baselines, Regression Detection, Metric Thresholds  
+**Security:** API Keys, SHA-256 Hashing, Project Isolation, Rate Limiting, CORS  
 **Dashboard:** Next.js, React, TypeScript  
-**Observability:** Prometheus, Grafana, OpenTelemetry  
-**Infrastructure:** Docker, Docker Compose, GitHub Actions
+**Observability:** Prometheus, Grafana, OpenTelemetry, Structured Logging  
+**Infrastructure:** Docker, Docker Compose, GitHub Actions, Automated Evaluation Gates
 
 ## What This Is
 
@@ -101,7 +103,7 @@ Instead of relying on manual inspection after every model, prompt, retrieval, or
 
 This project is not an LLM chatbot or a prompt wrapper.
 
-It is an engineering platform for evaluating and operating LLM and RAG systems across their development lifecycle.
+It is an engineering platform for evaluating, comparing, and continuously validating LLM and RAG systems across their development lifecycle.
 
 It combines:
 - Multi-dimensional LLM/RAG evaluation
@@ -184,28 +186,28 @@ http://localhost:3000
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/evaluations` | Sync evaluation |
-| `POST` | `/api/v1/evaluations/async` | Async batch (202) |
+| `POST` | `/api/v1/evaluations` | Run a synchronous evaluation |
+| `POST` | `/api/v1/evaluations/async` | Submit an asynchronous batch evaluation (202) |
 
 ### Runs & Jobs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/v1/runs` | List runs |
-| `GET` | `/api/v1/runs/{id}` | Get run details |
-| `GET` | `/api/v1/jobs` | List jobs |
-| `GET` | `/api/v1/jobs/{id}` | Job status + progress |
-| `POST` | `/api/v1/jobs/{id}/cancel` | Cancel job |
+| `GET` | `/api/v1/runs` | List persisted evaluation runs |
+| `GET` | `/api/v1/runs/{id}` | Retrieve evaluation run details |
+| `GET` | `/api/v1/jobs` | List asynchronous evaluation jobs |
+| `GET` | `/api/v1/jobs/{id}` | Retrieve job status and progress |
+| `POST` | `/api/v1/jobs/{id}/cancel` | Cooperatively cancel a queued/running job |
 
 ### Quality & Baselines
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/quality-gates` | Create gate |
-| `GET` | `/api/v1/quality-gates` | List gates |
-| `POST` | `/api/v1/baselines` | Create baseline |
-| `GET` | `/api/v1/baselines` | List baselines |
-| `GET` | `/api/v1/runs/{id}/compare/{baseline_id}` | Compare |
+| `POST` | `/api/v1/quality-gates` | Create metric quality thresholds |
+| `GET` | `/api/v1/quality-gates` | List configured quality gates |
+| `POST` | `/api/v1/baselines` | Create a baseline from an evaluation run |
+| `GET` | `/api/v1/baselines` | List project baselines |
+| `GET` | `/api/v1/runs/{id}/compare/{baseline_id}` | Compare a run against a baseline |
 
 ### Configuration
 
@@ -221,6 +223,8 @@ http://localhost:8000/docs
 
 ## Example: Submit Evaluation
 
+A synchronous evaluation accepts an LLM response and its supporting context and returns structured evaluation results.
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/evaluations \
   -H "Content-Type: application/json" \
@@ -235,19 +239,37 @@ curl -X POST http://localhost:8000/api/v1/evaluations \
     ]
   }'
 ```
+The evaluation engine runs the configured evaluators and returns structured metric results that can be persisted, compared against quality gates, or used as a baseline for future regression detection.
 
 ## Example: Batch Evaluation
+
+Asynchronous evaluation supports multiple evaluation cases in a single job. The API returns a job ID immediately, while the Redis/arq worker processes the batch in the background.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/evaluations/async \
   -H "Content-Type: application/json" \
   -d '{
     "items": [
-      {"conversation": {"model_response": "Drug X reduces fever."}, "context": [{"text": "Drug X treats fever."}]},
-      {"conversation": {"model_response": "Drug Y causes drowsiness."}, "context": [{"text": "Drug Y may cause drowsiness."}]}
+      {
+        "conversation": {
+          "model_response": "Drug X reduces fever."
+        },
+        "context": [
+          {"text": "Drug X is used to reduce fever."}
+        ]
+      },
+      {
+        "conversation": {
+          "model_response": "Drug Y may cause drowsiness."
+        },
+        "context": [
+          {"text": "Drug Y may cause drowsiness."}
+        ]
+      }
     ]
   }'
 ```
+The returned job can then be monitored through the jobs API until processing completes. Completed evaluation runs can be used for quality-gate checks, baseline creation, and regression comparison.
 
 ## Environment Variables
 
@@ -358,29 +380,32 @@ The platform supports predefined evaluation profiles that bundle evaluators for 
 
 | Profile | Purpose |
 |---------|---------|
-| `basic` | Core answer-quality evaluation |
-| `rag` | RAG-focused evaluation |
-| `rag_strict` | Stricter RAG quality evaluation |
-| `judge` | LLM-as-a-judge evaluation |
+| `basic` | Core answer-quality and traditional metric evaluation |
+| `rag` | RAG evaluation covering grounding and retrieval quality |
+| `rag_strict` | Stricter RAG evaluation with additional quality checks |
+| `judge` | Rubric-based LLM-as-a-judge evaluation |
 
-Profiles allow users to select an appropriate evaluation depth without manually configuring individual evaluators.
+Profiles allow users to select an appropriate evaluation strategy without manually configuring individual evaluators, making the same evaluation framework reusable across different LLM and RAG testing workflows.
 
 ## CI/CD Quality Gate
 
 The repository includes a GitHub Actions workflow that:
 
-1. Runs all tests
-2. Starts PostgreSQL + Redis
-3. Runs evaluation on a synthetic dataset
-4. Compares results against configured thresholds
-5. Fails the build if quality gates fail
+1. Runs the full automated test suite
+2. Starts isolated PostgreSQL and Redis service containers
+3. Applies the latest Alembic database migrations
+4. Runs representative LLM evaluation cases from the CI dataset
+5. Collects evaluator metrics for each case
+6. Compares results against configured quality-gate thresholds
+7. Reports individual metric PASS/FAIL results
+8. Fails the CI job when the configured quality gate is not satisfied
 
 ```yaml
 # .github/workflows/ci-evaluation.yml
 # Runs evaluation quality checks in CI
 ```
 
-The workflow turns AI-quality regressions into an automated CI signal rather than something discovered manually after deployment.
+The workflow turns AI-quality regressions into an automated CI signal by evaluating representative samples against configurable thresholds and failing the build when quality gates are not satisfied.
 
 ## Production Deployment
 
@@ -403,7 +428,7 @@ Migrations are **decoupled from application startup** in production to avoid a m
 3. `docker compose -f docker-compose.prod.yml up -d api worker` — these wait on
    `migrate: service_completed_successfully`; safe to scale to N replicas
 
-The local development compose file keeps the convenient `alembic upgrade head && uvicorn` startup because it runs a single instance.
+The local development compose file keeps the convenient `alembic upgrade head && uvicorn` startup for single-instance development, while production separates migrations from application startup to support safe horizontal scaling.
 
 ### Network isolation
 
@@ -429,10 +454,10 @@ The following are deployment-scale concerns that depend on the target infrastruc
 
 ## Known Limitations
 
-- **Cloud deployment:** Not yet performed. The production Docker Compose configuration is prepared, but public deployment requires a cloud provider and deployment-specific infrastructure.
-- **Grafana:** Dashboard auto-provisioned in `docker-compose.prod.yml`. Manual import is available via `config/grafana/dashboards/llm-eval.json`.
-- **Dashboard polish:** The dashboard is functional and communicates with the API, but additional UX polish can be added over time.
-- **High availability:** Production-scale HA PostgreSQL/Redis, automated failover, backups, and PITR depend on the target deployment infrastructure.
+- **Cloud deployment:** Not yet performed. The production Docker Compose configuration has been verified locally, but public deployment requires a cloud provider and deployment-specific infrastructure.
+- **Dashboard polish:** The dashboard is functional and communicates with the authenticated API, but additional UX improvements such as loading states, error recovery, and responsive mobile layouts can be added over time.
+- **High availability:** Production-scale PostgreSQL/Redis failover, automated backups, point-in-time recovery (PITR), and autoscaling depend on the target deployment infrastructure.
+- **TLS termination:** Public deployments should place a TLS-terminating reverse proxy or load balancer in front of the API.
 
 ## Cloud Deployment Status
 
@@ -440,7 +465,7 @@ The following are deployment-scale concerns that depend on the target infrastruc
 Deployed: NO
 Platform: N/A
 Public URL: N/A
-Reason: Cloud deployment has not yet been performed
+Status: Deployment-ready, not publicly deployed
 ```
 
 The repository is prepared for deployment, but no public cloud deployment is claimed until one has been actually provisioned and externally verified.
@@ -449,22 +474,22 @@ The repository is prepared for deployment, but no public cloud deployment is cla
 
 This project demonstrates practical engineering across:
 
-- LLM/RAG evaluation
-- Machine-learning model inference
-- Evaluation framework design
-- Async distributed processing
-- REST API development
-- PostgreSQL data modeling
-- Redis-based job processing
-- Authentication and authorization
-- Rate limiting
-- Regression detection
-- CI/CD quality enforcement
-- Observability
-- Containerization
-- Production configuration
-- Frontend/dashboard integration
-- Automated testing
+- LLM/RAG evaluation and evaluation framework design
+- Machine-learning model inference and NLP evaluation
+- RAG quality measurement and grounding analysis
+- LLM-as-a-judge and rubric-based evaluation
+- Async distributed processing and background workers
+- REST API and backend service development
+- PostgreSQL data modeling and Alembic migrations
+- Redis-based queues, job processing, retries, and idempotency
+- Authentication, authorization, API-key security, and project isolation
+- Redis-backed rate limiting and concurrency control
+- Quality gates, baselines, and metric-aware regression detection
+- CI/CD quality enforcement with GitHub Actions
+- Prometheus metrics, Grafana dashboards, OpenTelemetry tracing, and structured logging
+- Docker and multi-service container orchestration
+- Next.js/React dashboard development and API integration
+- Automated unit, integration, API, worker, security, and infrastructure testing
 
 The central design goal is to treat **LLM quality as an engineering signal that can be measured, persisted, compared, and enforced**.
 
