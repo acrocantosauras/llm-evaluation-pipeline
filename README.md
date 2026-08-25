@@ -5,7 +5,7 @@ A production-oriented LLM evaluation and quality-gate platform for RAG and LLM a
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-### Technology Stack
+## Technology Stack
 
 **Backend:** FastAPI, Python, Pydantic, SQLAlchemy, PostgreSQL, Alembic  
 **Async Processing:** Redis, arq, Background Workers, Batch Processing, Retries, Idempotency  
@@ -169,18 +169,18 @@ http://localhost:3000
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Application health |
-| `GET` | `/ready` | Database readiness |
-| `GET` | `/metrics` | Prometheus metrics |
+| `GET` | `/health` | Application health check |
+| `GET` | `/ready` | Database readiness check |
+| `GET` | `/metrics` | Prometheus metrics endpoint |
 
 ### Authentication
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/projects` | Create project |
+| `POST` | `/api/v1/projects` | Create a project |
 | `GET` | `/api/v1/projects` | List projects |
-| `POST` | `/api/v1/projects/{id}/api-keys` | Create API key |
-| `DELETE` | `/api/v1/projects/{id}/api-keys/{key_id}` | Revoke key |
+| `POST` | `/api/v1/projects/{id}/api-keys` | Create a project API key |
+| `DELETE` | `/api/v1/projects/{id}/api-keys/{key_id}` | Revoke an API key |
 
 ### Evaluations
 
@@ -213,12 +213,24 @@ http://localhost:3000
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/v1/profiles` | List evaluation profiles |
+| `GET` | `/api/v1/profiles` | List available evaluation profiles |
 
 Interactive API documentation is available at:
 
 ```text
 http://localhost:8000/docs
+```
+
+### Authentication
+
+Protected API endpoints require a project API key. Send the key using either the `X-API-Key` header or an `Authorization: Bearer <key>` header.
+
+For local development, create a project and API key using the authentication endpoints before submitting protected evaluations.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"name": "local-development"}'
 ```
 
 ## Example: Submit Evaluation
@@ -228,6 +240,7 @@ A synchronous evaluation accepts an LLM response and its supporting context and 
 ```bash
 curl -X POST http://localhost:8000/api/v1/evaluations \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
   -d '{
     "conversation": {
       "model_response": "Ibuprofen can cause stomach upset and drowsiness.",
@@ -248,6 +261,7 @@ Asynchronous evaluation supports multiple evaluation cases in a single job. The 
 ```bash
 curl -X POST http://localhost:8000/api/v1/evaluations/async \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
   -d '{
     "items": [
       {
@@ -297,7 +311,6 @@ The returned job can then be monitored through the jobs API until processing com
 pytest -q
 ruff check .
 ruff format --check .
-python main.py
 ```
 
 ### Current Validation
@@ -468,7 +481,7 @@ Public URL: N/A
 Status: Deployment-ready, not publicly deployed
 ```
 
-The repository is prepared for deployment, but no public cloud deployment is claimed until one has been actually provisioned and externally verified.
+The production configuration has been validated locally, but no public cloud deployment is claimed because cloud infrastructure has not yet been provisioned and externally verified.
 
 ## Engineering Focus
 
