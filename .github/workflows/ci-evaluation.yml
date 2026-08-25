@@ -16,6 +16,32 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,8 +60,14 @@ jobs:
           ruff check .
           ruff format --check .
 
-      - name: Run unit tests
-        run: pytest -q --ignore=tests/test_api_health.py --ignore=tests/test_api_evaluations.py
+      # Full suite (unit + API integration) against real Redis/Postgres services.
+      # No --ignore filters: every test file must run.
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+psycopg://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
+          REDIS_URL: redis://localhost:6379/0
+          APP_ENV: ci
+        run: pytest -q
 
   evaluation-quality-gate:
     name: Evaluation Quality Gate
@@ -92,10 +124,3 @@ jobs:
           APP_ENV: ci
         run: python scripts/evaluate_ci.py
         continue-on-error: false
-
-      - name: Run integration tests
-        env:
-          DATABASE_URL: postgresql+psycopg://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-          REDIS_URL: redis://localhost:6379/0
-          APP_ENV: ci
-        run: pytest tests/test_api_health.py tests/test_api_evaluations.py -q
